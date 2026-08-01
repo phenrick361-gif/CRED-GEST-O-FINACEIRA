@@ -1,0 +1,11 @@
+# Dependências
+/node_modules
+
+# Build
+/.next
+/out
+
+# Ambiente
+/.env
+/.env.local
+/.env*.local
