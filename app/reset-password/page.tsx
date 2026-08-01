@@ -1,2 +1,7 @@
+import { Suspense } from 'react';
 import AuthForm from '@/components/AuthForm';
-export default function Page(){ return <AuthForm mode="reset" />; }
+export default function Page(){ return (
+  <Suspense fallback={null}>
+    <AuthForm mode="reset" />
+  </Suspense>
+); }
