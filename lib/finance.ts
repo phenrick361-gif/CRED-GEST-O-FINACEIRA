@@ -85,6 +85,7 @@ export function formatName(name: string): string {
 
 export function situation(loan: Loan) {
   if (loan.status === 'Pago') return 'Pago';
+  if (loan.status === 'Cancelado') return 'Cancelado';
   const today = isoToday();
   if (loan.data_vencimento < today) return 'Atrasado';
   if (loan.data_vencimento === today) return 'Vence hoje';

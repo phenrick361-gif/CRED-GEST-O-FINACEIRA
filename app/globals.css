@@ -2,6 +2,7 @@
 @tailwind components;
 
 :root {
+  color-scheme: dark;
   --gold: #D4AF37;
   --gold-light: #F4C430;
   --gold-dark: #B8960F;
@@ -83,6 +84,51 @@ input:-webkit-autofill:active {
   background-color: #111827 !important;
   transition: background-color 5000s ease-in-out 0s;
   caret-color: var(--gold);
+}
+
+/* Native control refinements (remove white boxes/arrows in dark theme) */
+input[type="text"],
+input[type="search"],
+input[type="email"],
+input[type="password"],
+input[type="tel"],
+input:not([type]) {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+}
+.select {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23D4AF37' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  background-size: 12px;
+  padding-right: 40px;
+}
+.select::-ms-expand { display: none; }
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.75;
+  filter: invert(0.62) sepia(0.5) saturate(6) hue-rotate(6deg) brightness(0.95);
+}
+input[type="date"]::-webkit-calendar-picker-indicator:hover,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
+input:disabled, select:disabled, textarea:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  color: var(--text);
 }
 
 .btn {

@@ -216,7 +216,7 @@ export default function Dashboard() {
                 const sit = situation(l);
                 const name = formatName(l.cliente);
                 const initials = getInitials(name);
-                const corBadge = sit === 'Atrasado' ? 'badge-red' : sit === 'Vence hoje' ? 'badge-gold' : sit === 'Pago' ? 'badge-gray' : 'badge-green';
+                const corBadge = sit === 'Atrasado' ? 'badge-red' : sit === 'Vence hoje' ? 'badge-gold' : sit === 'Pago' || sit === 'Cancelado' ? 'badge-gray' : 'badge-green';
                 const classe = `badge ${corBadge}`;
                 return (
                   <Link key={l.id} href={`/contratos/${l.id}`} className="dashboard-recent-item">

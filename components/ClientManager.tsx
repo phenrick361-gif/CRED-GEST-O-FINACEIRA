@@ -432,7 +432,7 @@ export default function ClientManager({ loans, onChanged }: { loans: Loan[]; onC
                 <tbody>
                   {selData.items.map(l => {
                     const sit = situation(l);
-                    const corBadge = sit === 'Atrasado' ? 'badge-red' : sit === 'Vence hoje' ? 'badge-gold' : sit === 'Pago' ? 'badge-gray' : 'badge-green';
+                    const corBadge = sit === 'Atrasado' ? 'badge-red' : sit === 'Vence hoje' ? 'badge-gold' : sit === 'Pago' || sit === 'Cancelado' ? 'badge-gray' : 'badge-green';
                     return (
                       <tr key={l.id}>
                         <td style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>{money(l.valor_emprestado)}</td>
@@ -490,7 +490,7 @@ export default function ClientManager({ loans, onChanged }: { loans: Loan[]; onC
             <div className="mobile-only" style={{ padding: '8px 16px 16px' }}>
               {selData.items.map(l => {
                 const sit = situation(l);
-                const corBadge = sit === 'Atrasado' ? 'badge-red' : sit === 'Vence hoje' ? 'badge-gold' : sit === 'Pago' ? 'badge-gray' : 'badge-green';
+                const corBadge = sit === 'Atrasado' ? 'badge-red' : sit === 'Vence hoje' ? 'badge-gold' : sit === 'Pago' || sit === 'Cancelado' ? 'badge-gray' : 'badge-green';
                 return (
                   <div key={l.id} className="mobile-card" style={{ marginBottom: 8 }}>
                     <div className="mobile-card-header">

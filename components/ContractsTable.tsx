@@ -199,7 +199,7 @@ export default function ContractsTable({ loans, onChanged }: { loans: Loan[]; on
                   const sit = situation(l);
                   const name = formatName(l.cliente);
                   const initials = name.split(' ').filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
-                  const corBadge = sit === 'Atrasado' ? 'badge-red' : sit === 'Vence hoje' ? 'badge-gold' : sit === 'Pago' ? 'badge-gray' : 'badge-green';
+                  const corBadge = sit === 'Atrasado' ? 'badge-red' : sit === 'Vence hoje' ? 'badge-gold' : sit === 'Pago' || sit === 'Cancelado' ? 'badge-gray' : 'badge-green';
                   return (
                     <tr key={l.id}>
                       <td>
@@ -269,7 +269,7 @@ export default function ContractsTable({ loans, onChanged }: { loans: Loan[]; on
               const sit = situation(l);
               const name = formatName(l.cliente);
               const initials = name.split(' ').filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
-              const corBadge = sit === 'Atrasado' ? 'badge-red' : sit === 'Vence hoje' ? 'badge-gold' : sit === 'Pago' ? 'badge-gray' : 'badge-green';
+              const corBadge = sit === 'Atrasado' ? 'badge-red' : sit === 'Vence hoje' ? 'badge-gold' : sit === 'Pago' || sit === 'Cancelado' ? 'badge-gray' : 'badge-green';
               const open = cardDetails.has(l.id);
               return (
                 <div key={l.id} className="mobile-card">
