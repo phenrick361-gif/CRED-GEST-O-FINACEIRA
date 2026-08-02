@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { addMonth, interest, localDate, money, situation, total, formatName } from '@/lib/finance';
@@ -37,13 +37,14 @@ export default function ClientManager({ loans, onChanged }: { loans: Loan[]; onC
   const [busy, setBusy] = useState('');
   const [notif, setNotif] = useState('');
   const [openMenu, setOpenMenu] = useState<string | null>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
 
   const reload = () => onChanged?.();
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setOpenMenu(null);
+      const target = e.target as Node;
+      const openMenus = Array.from(document.querySelectorAll('.action-menu.open'));
+      if (!openMenus.some(m => m.contains(target))) setOpenMenu(null);
     }
     function handleEsc(e: KeyboardEvent) {
       if (e.key === 'Escape') setOpenMenu(null);
@@ -282,7 +283,7 @@ export default function ClientManager({ loans, onChanged }: { loans: Loan[]; onC
                                 <MoreHorizontal size={18} />
                               </button>
                               {openMenu === c.name && (
-                                <div className="action-menu open" ref={menuRef}>
+                                <div className="action-menu open">
                                   <button className="action-menu-item" onClick={() => { setOpenMenu(null); setSelected(c.name); }}>
                                     <Search size={16} /> Ver detalhes
                                   </button>
@@ -341,7 +342,7 @@ export default function ClientManager({ loans, onChanged }: { loans: Loan[]; onC
                             <MoreHorizontal size={16} />
                           </button>
                           {openMenu === c.name && (
-                            <div className="action-menu open" ref={menuRef}>
+                            <div className="action-menu open">
                               <button className="action-menu-item" onClick={() => { setOpenMenu(null); setSelected(c.name); }}>
                                 <Search size={16} /> Ver detalhes
                               </button>
@@ -449,7 +450,7 @@ export default function ClientManager({ loans, onChanged }: { loans: Loan[]; onC
                               <MoreHorizontal size={18} />
                             </button>
                             {openMenu === l.id && (
-                              <div className="action-menu open" ref={menuRef}>
+                              <div className="action-menu open">
                                 <button className="action-menu-item" onClick={() => { setOpenMenu(null); setEditContract({ ...l }); }}>
                                   <Edit size={16} /> Editar contrato
                                 </button>
@@ -522,7 +523,7 @@ export default function ClientManager({ loans, onChanged }: { loans: Loan[]; onC
                           <MoreHorizontal size={16} />
                         </button>
                         {openMenu === l.id && (
-                          <div className="action-menu open" ref={menuRef}>
+                          <div className="action-menu open">
                             <button className="action-menu-item" onClick={() => { setOpenMenu(null); setEditContract({ ...l }); }}>
                               <Edit size={16} /> Editar contrato
                             </button>

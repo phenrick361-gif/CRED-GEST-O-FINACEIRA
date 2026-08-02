@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { addMonth, interest, localDate, money, situation, total, hasInterest, formatName } from '@/lib/finance';
@@ -16,7 +16,6 @@ export default function ContractsTable({ loans, onChanged }: { loans: Loan[]; on
   const [currentPage, setCurrentPage] = useState(1);
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [cardDetails, setCardDetails] = useState<Set<string>>(new Set());
-  const menuRef = useRef<HTMLDivElement>(null);
   const itemsPerPage = 10;
 
   const reload = () => onChanged?.();
@@ -32,7 +31,9 @@ export default function ContractsTable({ loans, onChanged }: { loans: Loan[]; on
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      const openMenus = Array.from(document.querySelectorAll('.action-menu.open'));
+      if (!openMenus.some(m => m.contains(target))) {
         setOpenMenu(null);
       }
     }
@@ -225,7 +226,7 @@ export default function ContractsTable({ loans, onChanged }: { loans: Loan[]; on
                             <MoreHorizontal size={18} />
                           </button>
                           {openMenu === l.id && (
-                            <div className="action-menu open" ref={menuRef}>
+                            <div className="action-menu open">
                               <Link href={`/contratos/${l.id}`} className="action-menu-item" onClick={() => setOpenMenu(null)}>
                                 <Edit size={16} /> Editar contrato
                               </Link>
@@ -317,7 +318,7 @@ export default function ContractsTable({ loans, onChanged }: { loans: Loan[]; on
                         <MoreHorizontal size={16} />
                       </button>
                       {openMenu === l.id && (
-                        <div className="action-menu open" ref={menuRef}>
+                        <div className="action-menu open">
                           <Link href={`/contratos/${l.id}`} className="action-menu-item" onClick={() => setOpenMenu(null)}>
                             <Edit size={16} /> Editar contrato
                           </Link>

@@ -9,3 +9,8 @@
 /.env
 /.env.local
 /.env*.local
+
+# Logs e arquivos de build locais
+*.log
+tsconfig.tsbuildinfo
+*.mjs
