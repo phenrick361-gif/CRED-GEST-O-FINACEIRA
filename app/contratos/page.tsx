@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import AppShell from '@/components/AppShell';
 import ContractsTable from '@/components/ContractsTable';
@@ -10,8 +10,9 @@ import { PlusCircle } from 'lucide-react';
 
 export default function ContractsPage() {
   const [loans, setLoans] = useState<Loan[]>([]);
+  const [reloadKey, setReloadKey] = useState(0);
 
-  useEffect(() => {
+  const loadLoans = useCallback(() => {
     const supabase = createClient();
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (!user) return;
@@ -20,6 +21,10 @@ export default function ContractsPage() {
       });
     });
   }, []);
+
+  useEffect(() => {
+    loadLoans();
+  }, [loadLoans, reloadKey]);
 
   return (
     <AppShell>
@@ -35,7 +40,7 @@ export default function ContractsPage() {
         </div>
       </div>
 
-      <ContractsTable loans={loans} />
+      <ContractsTable loans={loans} onChanged={() => setReloadKey(k => k + 1)} />
     </AppShell>
   );
 }

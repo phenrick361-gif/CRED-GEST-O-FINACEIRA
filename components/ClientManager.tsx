@@ -25,7 +25,7 @@ function sanitize(v: string) { return v.replace(/[<>]/g, '').trim(); }
 
 const today = () => new Date().toISOString().slice(0, 10);
 
-export default function ClientManager({ loans }: { loans: Loan[] }) {
+export default function ClientManager({ loans, onChanged }: { loans: Loan[]; onChanged?: () => void }) {
   const router = useRouter();
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('Todos');
@@ -38,6 +38,8 @@ export default function ClientManager({ loans }: { loans: Loan[] }) {
   const [notif, setNotif] = useState('');
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  const reload = () => onChanged?.();
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -98,7 +100,11 @@ export default function ClientManager({ loans }: { loans: Loan[] }) {
 
   const selData = selected ? groups.find(c => c.name === selected) || null : null;
 
-  async function act(loan: Loan, kind: 'paid' | 'interest' | 'renew' | 'delete') {
+  useEffect(() => {
+    if (selected && !groups.some(c => c.name === selected)) setSelected(null);
+  }, [selected, groups]);
+
+  async function act(loan: Loan, kind: 'paid' | 'interest' | 'renew' | 'delete' | 'duplicate') {
     if (kind === 'delete') { setConfirmDel({ type: 'contract', item: loan }); return; }
     setBusy(loan.id + kind); setOpenMenu(null);
     const supabase = createClient();
@@ -119,8 +125,33 @@ export default function ClientManager({ loans }: { loans: Loan[] }) {
         await supabase.from('emprestimos').update({ data_vencimento: addMonth(loan.data_vencimento), status: 'Pendente' }).eq('id', loan.id).eq('user_id', user.id);
         notify(`Contrato de ${loan.cliente} renovado.`);
       }
+      if (kind === 'duplicate') {
+        const { id, created_at, updated_at, ...rest } = loan;
+        await supabase.from('emprestimos').insert({
+          ...rest, user_id: user.id, status: 'Pendente',
+          data_emprestimo: today(),
+          data_vencimento: addMonth(today())
+        });
+        notify(`Contrato de ${loan.cliente} duplicado.`);
+      }
     } catch (err: any) { notify(`Erro: ${err.message}`); }
-    finally { setBusy(''); router.refresh(); }
+    finally { setBusy(''); reload(); }
+  }
+
+  async function changeDueDate(loan: Loan) {
+    setOpenMenu(null);
+    const newDate = prompt('Nova data de vencimento (AAAA-MM-DD):', loan.data_vencimento);
+    if (!newDate || !newDate.match(/^\d{4}-\d{2}-\d{2}$/)) return;
+    setBusy('date_' + loan.id);
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) { router.replace('/login'); return; }
+    try {
+      const { error } = await supabase.from('emprestimos').update({ data_vencimento: newDate }).eq('id', loan.id).eq('user_id', user.id);
+      if (error) throw error;
+      notify(`Vencimento de ${loan.cliente} alterado para ${newDate}.`);
+    } catch (err: any) { notify(`Erro: ${err.message}`); }
+    finally { setBusy(''); reload(); }
   }
 
   async function deleteContract(loan: Loan) {
@@ -130,7 +161,7 @@ export default function ClientManager({ loans }: { loans: Loan[] }) {
     if (!user) { router.replace('/login'); return; }
     try {
       await supabase.from('emprestimos').delete().eq('id', loan.id).eq('user_id', user.id);
-      notify(`Contrato de ${loan.cliente} excluído.`); setConfirmDel(null); router.refresh();
+      notify(`Contrato de ${loan.cliente} excluído.`); setConfirmDel(null); reload();
     } catch (err: any) { notify(`Erro: ${err.message}`); }
     finally { setBusy(''); }
   }
@@ -143,7 +174,7 @@ export default function ClientManager({ loans }: { loans: Loan[] }) {
     try {
       const { error } = await supabase.from('emprestimos').delete().eq('user_id', user.id).eq('cliente', clientName);
       if (error) throw error;
-      notify(`Cliente ${clientName} excluído.`); setConfirmDel(null); setSelected(null); router.refresh();
+      notify(`Cliente ${clientName} excluído.`); setConfirmDel(null); setSelected(null); reload();
     } catch (err: any) { notify(`Erro: ${err.message}`); }
     finally { setBusy(''); }
   }
@@ -164,7 +195,7 @@ export default function ClientManager({ loans }: { loans: Loan[] }) {
         prazo_meses: Number(editContract.prazo_meses) || 1,
       }).eq('id', editContract.id).eq('user_id', user.id);
       if (error) throw error;
-      notify('Contrato atualizado com sucesso.'); setEditContract(null); router.refresh();
+      notify('Contrato atualizado com sucesso.'); setEditContract(null); reload();
     } catch (err: any) { notify(`Erro: ${err.message}`); }
     finally { setBusy(''); }
   }
@@ -178,7 +209,7 @@ export default function ClientManager({ loans }: { loans: Loan[] }) {
     try {
       const { error } = await supabase.from('emprestimos').update({ telefone: sanitize(editClient.phone) || null }).eq('user_id', user.id).eq('cliente', editClient.name);
       if (error) throw error;
-      notify('Cliente atualizado com sucesso.'); setEditClient(null); router.refresh();
+      notify('Cliente atualizado com sucesso.'); setEditClient(null); reload();
     } catch (err: any) { notify(`Erro: ${err.message}`); }
     finally { setBusy(''); }
   }
@@ -422,19 +453,7 @@ export default function ClientManager({ loans }: { loans: Loan[] }) {
                                 <button className="action-menu-item" onClick={() => { setOpenMenu(null); setEditContract({ ...l }); }}>
                                   <Edit size={16} /> Editar contrato
                                 </button>
-                                <button className="action-menu-item" onClick={async () => {
-                                  setOpenMenu(null);
-                                  const newDate = prompt('Nova data de vencimento (AAAA-MM-DD):', l.data_vencimento);
-                                  if (newDate && newDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
-                                    setBusy('date_' + l.id);
-                                    const supabase = createClient();
-                                    const { data: { user } } = await supabase.auth.getUser();
-                                    if (user) {
-                                      await supabase.from('emprestimos').update({ data_vencimento: newDate }).eq('id', l.id).eq('user_id', user.id);
-                                      setBusy(''); router.refresh();
-                                    }
-                                  }
-                                }}>
+                                <button className="action-menu-item" onClick={() => changeDueDate(l)} disabled={!!busy}>
                                   <Calendar size={16} /> Alterar vencimento
                                 </button>
                                 {l.status === 'Pendente' && (
@@ -448,7 +467,7 @@ export default function ClientManager({ loans }: { loans: Loan[] }) {
                                     <button className="action-menu-item" disabled={!!busy} onClick={() => act(l, 'paid')}>
                                       <CheckCircle size={16} /> Quitar contrato
                                     </button>
-                                    <button className="action-menu-item" disabled={!!busy} onClick={() => act({ ...l }, 'delete')}>
+                                    <button className="action-menu-item" disabled={!!busy} onClick={() => act(l, 'duplicate')}>
                                       <Copy size={16} /> Duplicar contrato
                                     </button>
                                   </>
@@ -507,19 +526,7 @@ export default function ClientManager({ loans }: { loans: Loan[] }) {
                             <button className="action-menu-item" onClick={() => { setOpenMenu(null); setEditContract({ ...l }); }}>
                               <Edit size={16} /> Editar contrato
                             </button>
-                            <button className="action-menu-item" onClick={async () => {
-                              setOpenMenu(null);
-                              const newDate = prompt('Nova data de vencimento (AAAA-MM-DD):', l.data_vencimento);
-                              if (newDate && newDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
-                                setBusy('date_' + l.id);
-                                const supabase = createClient();
-                                const { data: { user } } = await supabase.auth.getUser();
-                                if (user) {
-                                  await supabase.from('emprestimos').update({ data_vencimento: newDate }).eq('id', l.id).eq('user_id', user.id);
-                                  setBusy(''); router.refresh();
-                                }
-                              }
-                            }}>
+                            <button className="action-menu-item" onClick={() => changeDueDate(l)} disabled={!!busy}>
                               <Calendar size={16} /> Alterar vencimento
                             </button>
                             {l.status === 'Pendente' && (
@@ -532,6 +539,9 @@ export default function ClientManager({ loans }: { loans: Loan[] }) {
                                 </button>
                                 <button className="action-menu-item" disabled={!!busy} onClick={() => act(l, 'paid')}>
                                   <CheckCircle size={16} /> Quitar contrato
+                                </button>
+                                <button className="action-menu-item" disabled={!!busy} onClick={() => act(l, 'duplicate')}>
+                                  <Copy size={16} /> Duplicar contrato
                                 </button>
                               </>
                             )}

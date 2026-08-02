@@ -8,7 +8,7 @@ import { addMonth, interest, localDate, money, situation, total, hasInterest, fo
 import type { Loan } from '@/types';
 import { Edit, Calendar, DollarSign, RefreshCw, CheckCircle, Copy, Trash2, MoreHorizontal, ChevronDown, ChevronUp } from 'lucide-react';
 
-export default function ContractsTable({ loans }: { loans: Loan[] }) {
+export default function ContractsTable({ loans, onChanged }: { loans: Loan[]; onChanged?: () => void }) {
   const router = useRouter();
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('Todos');
@@ -18,6 +18,8 @@ export default function ContractsTable({ loans }: { loans: Loan[] }) {
   const [cardDetails, setCardDetails] = useState<Set<string>>(new Set());
   const menuRef = useRef<HTMLDivElement>(null);
   const itemsPerPage = 10;
+
+  const reload = () => onChanged?.();
 
   function toggleCardDetails(id: string) {
     setCardDetails(prev => {
@@ -50,9 +52,13 @@ export default function ContractsTable({ loans }: { loans: Loan[] }) {
       const hay = `${l.cliente} ${l.telefone || ''} ${l.descricao} ${l.id}`.toLowerCase();
       const match = hay.includes(search.toLowerCase());
       const sit = situation(l);
-      let statusMatch = filter === 'Todos' || filter === l.status || filter === sit;
-      if (filter === 'Com juros') statusMatch = hasInterest(l);
-      if (filter === 'Sem juros') statusMatch = !hasInterest(l);
+      let statusMatch = true;
+      if (filter === 'Em dia') statusMatch = sit === 'Em dia';
+      else if (filter === 'Vence hoje') statusMatch = sit === 'Vence hoje';
+      else if (filter === 'Atrasados') statusMatch = sit === 'Atrasado';
+      else if (filter === 'Pagos') statusMatch = sit === 'Pago';
+      else if (filter === 'Com juros') statusMatch = hasInterest(l);
+      else if (filter === 'Sem juros') statusMatch = !hasInterest(l);
       return match && statusMatch;
     });
   }, [loans, search, filter]);
@@ -60,6 +66,10 @@ export default function ContractsTable({ loans }: { loans: Loan[] }) {
   const totalPages = Math.ceil(filtered.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
   const currentItems = filtered.slice(startIndex, startIndex + itemsPerPage);
+
+  useEffect(() => {
+    if (currentPage > totalPages) setCurrentPage(Math.max(1, totalPages));
+  }, [totalPages, currentPage]);
 
   function toggleMenu(id: string) {
     setOpenMenu(openMenu === id ? null : id);
@@ -97,7 +107,7 @@ export default function ContractsTable({ loans }: { loans: Loan[] }) {
         }).eq('id', loan.id).eq('user_id', user.id);
       }
       if (kind === 'duplicate') {
-        const { id, created_at, ...rest } = loan;
+        const { id, created_at, updated_at, ...rest } = loan;
         await supabase.from('emprestimos').insert({
           ...rest, user_id: user.id, status: 'Pendente',
           data_emprestimo: new Date().toISOString().slice(0, 10),
@@ -108,8 +118,28 @@ export default function ContractsTable({ loans }: { loans: Loan[] }) {
       console.error('Erro ao executar ação:', error);
     } finally {
       setBusy('');
-      router.refresh();
+      reload();
     }
+  }
+
+  async function changeDueDate(loan: Loan) {
+    setOpenMenu(null);
+    const newDate = prompt('Nova data de vencimento (AAAA-MM-DD):', loan.data_vencimento);
+    if (!newDate || !newDate.match(/^\d{4}-\d{2}-\d{2}$/)) return;
+    setBusy('date_' + loan.id);
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) { router.replace('/login'); return; }
+    const { error } = await supabase.from('emprestimos')
+      .update({ data_vencimento: newDate })
+      .eq('id', loan.id)
+      .eq('user_id', user.id);
+    setBusy('');
+    if (error) {
+      console.error('Erro ao alterar vencimento:', error);
+      return;
+    }
+    reload();
   }
 
   const goToPage = (page: number) => {
@@ -199,18 +229,7 @@ export default function ContractsTable({ loans }: { loans: Loan[] }) {
                               <Link href={`/contratos/${l.id}`} className="action-menu-item" onClick={() => setOpenMenu(null)}>
                                 <Edit size={16} /> Editar contrato
                               </Link>
-                              <button className="action-menu-item" onClick={async () => { setOpenMenu(null);
-                                const newDate = prompt('Nova data de vencimento (AAAA-MM-DD):', l.data_vencimento);
-                                if (newDate && newDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
-                                  setBusy('date_' + l.id);
-                                  const supabase = createClient();
-                                  const { data: { user } } = await supabase.auth.getUser();
-                                  if (user) {
-                                    await supabase.from('emprestimos').update({ data_vencimento: newDate }).eq('id', l.id).eq('user_id', user.id);
-                                    setBusy(''); router.refresh();
-                                  }
-                                }
-                              }}>
+                              <button className="action-menu-item" onClick={() => changeDueDate(l)} disabled={!!busy}>
                                 <Calendar size={16} /> Alterar vencimento
                               </button>
                               {l.status === 'Pendente' && (
@@ -302,18 +321,7 @@ export default function ContractsTable({ loans }: { loans: Loan[] }) {
                           <Link href={`/contratos/${l.id}`} className="action-menu-item" onClick={() => setOpenMenu(null)}>
                             <Edit size={16} /> Editar contrato
                           </Link>
-                          <button className="action-menu-item" onClick={async () => { setOpenMenu(null);
-                            const newDate = prompt('Nova data de vencimento (AAAA-MM-DD):', l.data_vencimento);
-                            if (newDate && newDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
-                              setBusy('date_' + l.id);
-                              const supabase = createClient();
-                              const { data: { user } } = await supabase.auth.getUser();
-                              if (user) {
-                                await supabase.from('emprestimos').update({ data_vencimento: newDate }).eq('id', l.id).eq('user_id', user.id);
-                                setBusy(''); router.refresh();
-                              }
-                            }
-                          }}>
+                          <button className="action-menu-item" onClick={() => changeDueDate(l)} disabled={!!busy}>
                             <Calendar size={16} /> Alterar vencimento
                           </button>
                           {l.status === 'Pendente' && (
