@@ -4,9 +4,10 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
-import { addMonth, interest, localDate, money, situation, total, hasInterest, formatName } from '@/lib/finance';
+import { addMonth, interest, localDate, money, situation, total, hasInterest, formatName, isoToday } from '@/lib/finance';
 import type { Loan } from '@/types';
-import { Edit, Calendar, DollarSign, RefreshCw, CheckCircle, Copy, Trash2, MoreHorizontal, ChevronDown, ChevronUp } from 'lucide-react';
+import { Edit, Calendar, DollarSign, RefreshCw, CheckCircle, Copy, Trash2, ChevronDown, ChevronUp } from 'lucide-react';
+import ActionMenu from './ActionMenu';
 
 export default function ContractsTable({ loans, onChanged }: { loans: Loan[]; onChanged?: () => void }) {
   const router = useRouter();
@@ -14,11 +15,16 @@ export default function ContractsTable({ loans, onChanged }: { loans: Loan[]; on
   const [filter, setFilter] = useState('Todos');
   const [busy, setBusy] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
-  const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [cardDetails, setCardDetails] = useState<Set<string>>(new Set());
+  const [errorMsg, setErrorMsg] = useState('');
   const itemsPerPage = 10;
 
   const reload = () => onChanged?.();
+
+  function notify(message: string) {
+    setErrorMsg(message);
+    window.setTimeout(() => setErrorMsg(''), 6000);
+  }
 
   function toggleCardDetails(id: string) {
     setCardDetails(prev => {
@@ -28,25 +34,6 @@ export default function ContractsTable({ loans, onChanged }: { loans: Loan[]; on
       return next;
     });
   }
-
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      const target = e.target as Node;
-      const openMenus = Array.from(document.querySelectorAll('.action-menu.open'));
-      if (!openMenus.some(m => m.contains(target))) {
-        setOpenMenu(null);
-      }
-    }
-    function handleEsc(e: KeyboardEvent) {
-      if (e.key === 'Escape') setOpenMenu(null);
-    }
-    document.addEventListener('mousedown', handleClickOutside);
-    document.addEventListener('keydown', handleEsc);
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-      document.removeEventListener('keydown', handleEsc);
-    };
-  }, []);
 
   const filtered = useMemo(() => {
     return loans.filter(l => {
@@ -72,51 +59,50 @@ export default function ContractsTable({ loans, onChanged }: { loans: Loan[]; on
     if (currentPage > totalPages) setCurrentPage(Math.max(1, totalPages));
   }, [totalPages, currentPage]);
 
-  function toggleMenu(id: string) {
-    setOpenMenu(openMenu === id ? null : id);
-  }
-
   async function act(loan: Loan, kind: 'paid' | 'interest' | 'renew' | 'delete' | 'duplicate') {
     if (kind === 'delete' && !confirm(`Excluir o contrato de ${loan.cliente}?`)) return;
     setBusy(loan.id + kind);
-    setOpenMenu(null);
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { router.replace('/login'); return; }
 
     try {
+      const check = (res: { error: any }) => {
+        if (res.error) throw new Error(res.error.message);
+      };
       if (kind === 'delete') {
-        await supabase.from('emprestimos').delete().eq('id', loan.id).eq('user_id', user.id);
+        check(await supabase.from('emprestimos').delete().eq('id', loan.id).eq('user_id', user.id));
       }
       if (kind === 'paid') {
-        await supabase.from('pagamentos').insert({
+        check(await supabase.from('pagamentos').insert({
           user_id: user.id, emprestimo_id: loan.id, tipo: 'Total', valor: total(loan)
-        });
-        await supabase.from('emprestimos').update({ status: 'Pago' }).eq('id', loan.id).eq('user_id', user.id);
+        }));
+        check(await supabase.from('emprestimos').update({ status: 'Pago' }).eq('id', loan.id).eq('user_id', user.id));
       }
       if (kind === 'interest') {
-        await supabase.from('pagamentos').insert({
+        check(await supabase.from('pagamentos').insert({
           user_id: user.id, emprestimo_id: loan.id, tipo: 'Juros', valor: interest(loan)
-        });
-        await supabase.from('emprestimos').update({
+        }));
+        check(await supabase.from('emprestimos').update({
           status: 'Pendente', data_vencimento: addMonth(loan.data_vencimento)
-        }).eq('id', loan.id).eq('user_id', user.id);
+        }).eq('id', loan.id).eq('user_id', user.id));
       }
       if (kind === 'renew') {
-        await supabase.from('emprestimos').update({
+        check(await supabase.from('emprestimos').update({
           data_vencimento: addMonth(loan.data_vencimento), status: 'Pendente'
-        }).eq('id', loan.id).eq('user_id', user.id);
+        }).eq('id', loan.id).eq('user_id', user.id));
       }
       if (kind === 'duplicate') {
         const { id, created_at, updated_at, ...rest } = loan;
-        await supabase.from('emprestimos').insert({
+        check(await supabase.from('emprestimos').insert({
           ...rest, user_id: user.id, status: 'Pendente',
-          data_emprestimo: new Date().toISOString().slice(0, 10),
-          data_vencimento: addMonth(new Date().toISOString().slice(0, 10))
-        });
+          data_emprestimo: isoToday(),
+          data_vencimento: addMonth(isoToday())
+        }));
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erro ao executar ação:', error);
+      notify(error?.message || 'Erro ao executar ação. Tente novamente.');
     } finally {
       setBusy('');
       reload();
@@ -124,7 +110,6 @@ export default function ContractsTable({ loans, onChanged }: { loans: Loan[]; on
   }
 
   async function changeDueDate(loan: Loan) {
-    setOpenMenu(null);
     const newDate = prompt('Nova data de vencimento (AAAA-MM-DD):', loan.data_vencimento);
     if (!newDate || !newDate.match(/^\d{4}-\d{2}-\d{2}$/)) return;
     setBusy('date_' + loan.id);
@@ -170,6 +155,10 @@ export default function ContractsTable({ loans, onChanged }: { loans: Loan[]; on
           ))}
         </div>
       </div>
+
+      {errorMsg && (
+        <div className="error" style={{ marginBottom: 12 }}>{errorMsg}</div>
+      )}
 
       {filtered.length === 0 ? (
         <div className="panel" style={{ textAlign: 'center', padding: 48 }}>
@@ -221,41 +210,18 @@ export default function ContractsTable({ loans, onChanged }: { loans: Loan[]; on
                         <span className={`badge ${corBadge}`}>{sit}</span>
                       </td>
                       <td style={{ textAlign: 'center' }}>
-                        <div className="action-menu-wrap">
-                          <button className="action-menu-btn" onClick={() => toggleMenu(l.id)} disabled={!!busy}>
-                            <MoreHorizontal size={18} />
-                          </button>
-                          {openMenu === l.id && (
-                            <div className="action-menu open">
-                              <Link href={`/contratos/${l.id}`} className="action-menu-item" onClick={() => setOpenMenu(null)}>
-                                <Edit size={16} /> Editar contrato
-                              </Link>
-                              <button className="action-menu-item" onClick={() => changeDueDate(l)} disabled={!!busy}>
-                                <Calendar size={16} /> Alterar vencimento
-                              </button>
-                              {l.status === 'Pendente' && (
-                                <>
-                                  <button className="action-menu-item" disabled={!!busy} onClick={() => act(l, 'interest')}>
-                                    <DollarSign size={16} /> Receber juros
-                                  </button>
-                                  <button className="action-menu-item" disabled={!!busy} onClick={() => act(l, 'renew')}>
-                                    <RefreshCw size={16} /> Renovar contrato
-                                  </button>
-                                  <button className="action-menu-item" disabled={!!busy} onClick={() => act(l, 'paid')}>
-                                    <CheckCircle size={16} /> Quitar contrato
-                                  </button>
-                                </>
-                              )}
-                              <button className="action-menu-item" disabled={!!busy} onClick={() => act(l, 'duplicate')}>
-                                <Copy size={16} /> Duplicar contrato
-                              </button>
-                              <div className="action-menu-divider" />
-                              <button className="action-menu-item danger" disabled={!!busy} onClick={() => act(l, 'delete')}>
-                                <Trash2 size={16} /> Excluir contrato
-                              </button>
-                            </div>
-                          )}
-                        </div>
+                        <ActionMenu items={[
+                          { label: 'Editar contrato', icon: <Edit size={16} />, href: `/contratos/${l.id}` },
+                          { label: 'Alterar vencimento', icon: <Calendar size={16} />, onClick: () => changeDueDate(l), disabled: !!busy },
+                          ...(l.status === 'Pendente' ? [
+                            { label: 'Receber juros', icon: <DollarSign size={16} />, onClick: () => act(l, 'interest'), disabled: !!busy },
+                            { label: 'Renovar contrato', icon: <RefreshCw size={16} />, onClick: () => act(l, 'renew'), disabled: !!busy },
+                            { label: 'Quitar contrato', icon: <CheckCircle size={16} />, onClick: () => act(l, 'paid'), disabled: !!busy },
+                          ] : []),
+                          { label: 'Duplicar contrato', icon: <Copy size={16} />, onClick: () => act(l, 'duplicate'), disabled: !!busy },
+                          { divider: true },
+                          { label: 'Excluir contrato', icon: <Trash2 size={16} />, danger: true, onClick: () => act(l, 'delete'), disabled: !!busy },
+                        ]} />
                       </td>
                     </tr>
                   );
@@ -308,47 +274,24 @@ export default function ContractsTable({ loans, onChanged }: { loans: Loan[]; on
                       <span className="mobile-card-detail-value">{localDate(l.data_emprestimo)}</span>
                     </div>
                   </div>
-                  <div className="mobile-card-actions">
-                    <button className="card-details-toggle" onClick={() => toggleCardDetails(l.id)}>
-                      {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                      {open ? 'Menos detalhes' : 'Ver detalhes'}
-                    </button>
-                    <div className="action-menu-wrap">
-                      <button className="action-menu-btn" onClick={() => toggleMenu(l.id)} disabled={!!busy}>
-                        <MoreHorizontal size={16} />
+                    <div className="mobile-card-actions">
+                      <button className="card-details-toggle" onClick={() => toggleCardDetails(l.id)}>
+                        {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                        {open ? 'Menos detalhes' : 'Ver detalhes'}
                       </button>
-                      {openMenu === l.id && (
-                        <div className="action-menu open">
-                          <Link href={`/contratos/${l.id}`} className="action-menu-item" onClick={() => setOpenMenu(null)}>
-                            <Edit size={16} /> Editar contrato
-                          </Link>
-                          <button className="action-menu-item" onClick={() => changeDueDate(l)} disabled={!!busy}>
-                            <Calendar size={16} /> Alterar vencimento
-                          </button>
-                          {l.status === 'Pendente' && (
-                            <>
-                              <button className="action-menu-item" disabled={!!busy} onClick={() => act(l, 'interest')}>
-                                <DollarSign size={16} /> Receber juros
-                              </button>
-                              <button className="action-menu-item" disabled={!!busy} onClick={() => act(l, 'renew')}>
-                                <RefreshCw size={16} /> Renovar contrato
-                              </button>
-                              <button className="action-menu-item" disabled={!!busy} onClick={() => act(l, 'paid')}>
-                                <CheckCircle size={16} /> Quitar contrato
-                              </button>
-                            </>
-                          )}
-                          <button className="action-menu-item" disabled={!!busy} onClick={() => act(l, 'duplicate')}>
-                            <Copy size={16} /> Duplicar contrato
-                          </button>
-                          <div className="action-menu-divider" />
-                          <button className="action-menu-item danger" disabled={!!busy} onClick={() => act(l, 'delete')}>
-                            <Trash2 size={16} /> Excluir contrato
-                          </button>
-                        </div>
-                      )}
+                      <ActionMenu iconSize={16} items={[
+                        { label: 'Editar contrato', icon: <Edit size={16} />, href: `/contratos/${l.id}` },
+                        { label: 'Alterar vencimento', icon: <Calendar size={16} />, onClick: () => changeDueDate(l), disabled: !!busy },
+                        ...(l.status === 'Pendente' ? [
+                          { label: 'Receber juros', icon: <DollarSign size={16} />, onClick: () => act(l, 'interest'), disabled: !!busy },
+                          { label: 'Renovar contrato', icon: <RefreshCw size={16} />, onClick: () => act(l, 'renew'), disabled: !!busy },
+                          { label: 'Quitar contrato', icon: <CheckCircle size={16} />, onClick: () => act(l, 'paid'), disabled: !!busy },
+                        ] : []),
+                        { label: 'Duplicar contrato', icon: <Copy size={16} />, onClick: () => act(l, 'duplicate'), disabled: !!busy },
+                        { divider: true },
+                        { label: 'Excluir contrato', icon: <Trash2 size={16} />, danger: true, onClick: () => act(l, 'delete'), disabled: !!busy },
+                      ]} />
                     </div>
-                  </div>
                 </div>
               );
             })}

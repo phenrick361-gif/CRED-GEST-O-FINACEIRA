@@ -20,7 +20,14 @@ export const isZeroInterest = (loan: Pick<Loan, 'porcentagem_juros'>) =>
 export const hasInterest = (loan: Pick<Loan, 'porcentagem_juros'>) =>
   Number(loan.porcentagem_juros) > 0;
 
-export const isoToday = () => new Date().toISOString().slice(0, 10);
+export function localISODate(d: Date = new Date()): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+export const isoToday = () => localISODate();
 
 export const addMonth = (iso: string) => {
   const date = new Date(`${iso}T12:00:00`);
@@ -29,7 +36,7 @@ export const addMonth = (iso: string) => {
   date.setMonth(date.getMonth() + 1);
   const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
   date.setDate(Math.min(originalDay, lastDay));
-  return date.toISOString().slice(0, 10);
+  return localISODate(date);
 };
 
 export function parseCurrencyBR(value: string | null | undefined): number | null {

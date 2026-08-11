@@ -1,12 +1,19 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
+import { FormEvent, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import type { Loan } from '@/types';
 import { User, DollarSign, Calendar, FileText } from 'lucide-react';
 
 type Initial = Partial<Loan>;
+
+function formatLocalDate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
 
 function addMonths(iso: string, months: number): string {
   if (!iso || isNaN(Date.parse(iso))) { throw new Error('Data inválida'); }
@@ -16,7 +23,7 @@ function addMonths(iso: string, months: number): string {
   d.setMonth(d.getMonth() + months);
   const last = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
   d.setDate(Math.min(day, last));
-  return d.toISOString().slice(0, 10);
+  return formatLocalDate(d);
 }
 
 function validatePhone(phone: string): boolean {
@@ -47,7 +54,7 @@ function validateLoanForm(formData: any): { valid: boolean; errors: string[] } {
 
 export default function LoanForm({ initial, id }: { initial?: Initial; id?: string }) {
   const router = useRouter();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = formatLocalDate(new Date());
   const [form, setForm] = useState({
     cliente: initial?.cliente ? sanitizeInput(initial.cliente) : '',
     telefone: initial?.telefone ? sanitizeInput(initial.telefone) : '',
@@ -66,10 +73,28 @@ export default function LoanForm({ initial, id }: { initial?: Initial; id?: stri
   const [error, setError] = useState('');
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
+  const autoVencimento = useRef(true);
+
+  const recalcVencimento = (nextForm: typeof form) => {
+    try {
+      return addMonths(nextForm.data_emprestimo || today, Number(nextForm.prazo_meses) || 1);
+    } catch {
+      return nextForm.data_vencimento;
+    }
+  };
 
   const change = (key: string, value: string) => {
     const sanitizedValue = sanitizeInput(value);
-    setForm(prev => ({ ...prev, [key]: sanitizedValue }));
+    setForm(prev => {
+      let next = { ...prev, [key]: sanitizedValue };
+      if (key === 'data_emprestimo' || key === 'prazo_meses') {
+        autoVencimento.current = true;
+        next = { ...next, data_vencimento: recalcVencimento(next) };
+      } else if (key === 'data_vencimento') {
+        autoVencimento.current = false;
+      }
+      return next;
+    });
     if (validationErrors.length > 0) {
       const newForm = { ...form, [key]: sanitizedValue };
       const validation = validateLoanForm(newForm);
@@ -111,6 +136,7 @@ export default function LoanForm({ initial, id }: { initial?: Initial; id?: stri
       }
 
       if (result.error) { throw new Error(result.error.message); }
+      if (typeof window !== 'undefined') window.dispatchEvent(new Event('cred-data-changed'));
       router.push('/contratos');
       router.refresh();
     } catch (err: any) {

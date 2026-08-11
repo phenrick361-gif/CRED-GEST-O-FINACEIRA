@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { LOAN_COLUMNS } from '@/lib/supabase/columns';
 import { interest, isoToday, localDate, money, total, hasInterest } from '@/lib/finance';
 import type { Loan } from '@/types';
 import AppShell from '@/components/AppShell';
@@ -11,18 +12,39 @@ import { DollarSign, Briefcase, TrendingUp, PiggyBank, FileText, Percent, CheckC
 export default function BalancoGeral() {
   const [loans, setLoans] = useState<Loan[]>([]);
   const [pagamentos, setPagamentos] = useState<{ valor: number }[]>([]);
+  const [errorMsg, setErrorMsg] = useState('');
 
-  useEffect(() => {
+  const load = () => {
     const supabase = createClient();
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (!user) return;
-      supabase.from('emprestimos').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).then(({ data }) => {
-        setLoans((data || []) as Loan[]);
-      });
-      supabase.from('pagamentos').select('valor').eq('user_id', user.id).eq('tipo', 'Juros').then(({ data }) => {
+      supabase
+        .from('emprestimos')
+        .select(LOAN_COLUMNS)
+        .eq('user_id', user.id)
+        .order('data_emprestimo', { ascending: false })
+        .then(({ data, error }) => {
+          if (error) { setErrorMsg(error.message); return; }
+          setLoans((data || []) as Loan[]);
+        });
+      supabase.from('pagamentos').select('valor').eq('user_id', user.id).eq('tipo', 'Juros').then(({ data, error }) => {
+        if (error) { setErrorMsg(error.message); return; }
         setPagamentos((data || []) as { valor: number }[]);
       });
     });
+  };
+
+  useEffect(() => {
+    load();
+    const onChanged = () => load();
+    window.addEventListener('cred-data-changed', onChanged);
+    window.addEventListener('focus', onChanged);
+    document.addEventListener('visibilitychange', onChanged);
+    return () => {
+      window.removeEventListener('cred-data-changed', onChanged);
+      window.removeEventListener('focus', onChanged);
+      document.removeEventListener('visibilitychange', onChanged);
+    };
   }, []);
 
   const today = isoToday();

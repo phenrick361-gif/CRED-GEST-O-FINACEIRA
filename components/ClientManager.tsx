@@ -3,10 +3,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
-import { addMonth, interest, localDate, money, situation, total, formatName } from '@/lib/finance';
+import { addMonth, interest, localDate, money, situation, total, formatName, isoToday } from '@/lib/finance';
 import type { Loan } from '@/types';
 import Link from 'next/link';
-import { Edit, Calendar, DollarSign, RefreshCw, CheckCircle, Copy, Trash2, MoreHorizontal, ArrowLeft, UserPlus, Search } from 'lucide-react';
+import { Edit, Calendar, DollarSign, RefreshCw, CheckCircle, Copy, Trash2, ArrowLeft, UserPlus, Search } from 'lucide-react';
+import ActionMenu from './ActionMenu';
 
 type ClientGroup = {
   name: string;
@@ -23,7 +24,7 @@ const statusValidos = new Set(['Pendente', 'Pago', 'Cancelado']);
 
 function sanitize(v: string) { return v.replace(/[<>]/g, '').trim(); }
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => isoToday();
 
 export default function ClientManager({ loans, onChanged }: { loans: Loan[]; onChanged?: () => void }) {
   const router = useRouter();
@@ -36,26 +37,8 @@ export default function ClientManager({ loans, onChanged }: { loans: Loan[]; onC
   const [confirmDel, setConfirmDel] = useState<{ type: 'client' | 'contract'; item: any } | null>(null);
   const [busy, setBusy] = useState('');
   const [notif, setNotif] = useState('');
-  const [openMenu, setOpenMenu] = useState<string | null>(null);
 
   const reload = () => onChanged?.();
-
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      const target = e.target as Node;
-      const openMenus = Array.from(document.querySelectorAll('.action-menu.open'));
-      if (!openMenus.some(m => m.contains(target))) setOpenMenu(null);
-    }
-    function handleEsc(e: KeyboardEvent) {
-      if (e.key === 'Escape') setOpenMenu(null);
-    }
-    document.addEventListener('mousedown', handleClickOutside);
-    document.addEventListener('keydown', handleEsc);
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-      document.removeEventListener('keydown', handleEsc);
-    };
-  }, []);
 
   function notify(msg: string) { setNotif(msg); setTimeout(() => setNotif(''), 3500); }
 
@@ -107,32 +90,35 @@ export default function ClientManager({ loans, onChanged }: { loans: Loan[]; onC
 
   async function act(loan: Loan, kind: 'paid' | 'interest' | 'renew' | 'delete' | 'duplicate') {
     if (kind === 'delete') { setConfirmDel({ type: 'contract', item: loan }); return; }
-    setBusy(loan.id + kind); setOpenMenu(null);
+    setBusy(loan.id + kind);
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { router.replace('/login'); return; }
     try {
+      const check = (res: { error: any }) => {
+        if (res.error) throw new Error(res.error.message);
+      };
       if (kind === 'paid') {
-        await supabase.from('pagamentos').insert({ user_id: user.id, emprestimo_id: loan.id, tipo: 'Total', valor: total(loan) });
-        await supabase.from('emprestimos').update({ status: 'Pago' }).eq('id', loan.id).eq('user_id', user.id);
+        check(await supabase.from('pagamentos').insert({ user_id: user.id, emprestimo_id: loan.id, tipo: 'Total', valor: total(loan) }));
+        check(await supabase.from('emprestimos').update({ status: 'Pago' }).eq('id', loan.id).eq('user_id', user.id));
         notify(`Contrato de ${loan.cliente} marcado como pago.`);
       }
       if (kind === 'interest') {
-        await supabase.from('pagamentos').insert({ user_id: user.id, emprestimo_id: loan.id, tipo: 'Juros', valor: interest(loan) });
-        await supabase.from('emprestimos').update({ status: 'Pendente', data_vencimento: addMonth(loan.data_vencimento) }).eq('id', loan.id).eq('user_id', user.id);
+        check(await supabase.from('pagamentos').insert({ user_id: user.id, emprestimo_id: loan.id, tipo: 'Juros', valor: interest(loan) }));
+        check(await supabase.from('emprestimos').update({ status: 'Pendente', data_vencimento: addMonth(loan.data_vencimento) }).eq('id', loan.id).eq('user_id', user.id));
         notify(`Juros de ${loan.cliente} registrados. Vencimento renovado.`);
       }
       if (kind === 'renew') {
-        await supabase.from('emprestimos').update({ data_vencimento: addMonth(loan.data_vencimento), status: 'Pendente' }).eq('id', loan.id).eq('user_id', user.id);
+        check(await supabase.from('emprestimos').update({ data_vencimento: addMonth(loan.data_vencimento), status: 'Pendente' }).eq('id', loan.id).eq('user_id', user.id));
         notify(`Contrato de ${loan.cliente} renovado.`);
       }
       if (kind === 'duplicate') {
         const { id, created_at, updated_at, ...rest } = loan;
-        await supabase.from('emprestimos').insert({
+        check(await supabase.from('emprestimos').insert({
           ...rest, user_id: user.id, status: 'Pendente',
           data_emprestimo: today(),
           data_vencimento: addMonth(today())
-        });
+        }));
         notify(`Contrato de ${loan.cliente} duplicado.`);
       }
     } catch (err: any) { notify(`Erro: ${err.message}`); }
@@ -140,7 +126,6 @@ export default function ClientManager({ loans, onChanged }: { loans: Loan[]; onC
   }
 
   async function changeDueDate(loan: Loan) {
-    setOpenMenu(null);
     const newDate = prompt('Nova data de vencimento (AAAA-MM-DD):', loan.data_vencimento);
     if (!newDate || !newDate.match(/^\d{4}-\d{2}-\d{2}$/)) return;
     setBusy('date_' + loan.id);
@@ -156,12 +141,13 @@ export default function ClientManager({ loans, onChanged }: { loans: Loan[]; onC
   }
 
   async function deleteContract(loan: Loan) {
-    setBusy('del_' + loan.id); setOpenMenu(null);
+    setBusy('del_' + loan.id);
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { router.replace('/login'); return; }
     try {
-      await supabase.from('emprestimos').delete().eq('id', loan.id).eq('user_id', user.id);
+      const { error } = await supabase.from('emprestimos').delete().eq('id', loan.id).eq('user_id', user.id);
+      if (error) throw new Error(error.message);
       notify(`Contrato de ${loan.cliente} excluído.`); setConfirmDel(null); reload();
     } catch (err: any) { notify(`Erro: ${err.message}`); }
     finally { setBusy(''); }
@@ -278,25 +264,12 @@ export default function ClientManager({ loans, onChanged }: { loans: Loan[]; onC
                           <td className="text-right" style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: 'var(--gold)' }}>{money(c.totalAReceber)}</td>
                           <td style={{ textAlign: 'center' }}><span className={`badge ${sitBadge}`}>{sitText}</span></td>
                           <td style={{ textAlign: 'center' }} onClick={e => e.stopPropagation()}>
-                            <div className="action-menu-wrap">
-                              <button className="action-menu-btn" onClick={() => setOpenMenu(openMenu === c.name ? null : c.name)}>
-                                <MoreHorizontal size={18} />
-                              </button>
-                              {openMenu === c.name && (
-                                <div className="action-menu open">
-                                  <button className="action-menu-item" onClick={() => { setOpenMenu(null); setSelected(c.name); }}>
-                                    <Search size={16} /> Ver detalhes
-                                  </button>
-                                  <button className="action-menu-item" onClick={() => { setOpenMenu(null); setEditClient({ name: c.name, phone: c.phone }); }}>
-                                    <Edit size={16} /> Editar cliente
-                                  </button>
-                                  <div className="action-menu-divider" />
-                                  <button className="action-menu-item danger" onClick={() => { setOpenMenu(null); setConfirmDel({ type: 'client', item: c.name }); }}>
-                                    <Trash2 size={16} /> Excluir cliente
-                                  </button>
-                                </div>
-                              )}
-                            </div>
+                            <ActionMenu items={[
+                              { label: 'Ver detalhes', icon: <Search size={16} />, onClick: () => setSelected(c.name) },
+                              { label: 'Editar cliente', icon: <Edit size={16} />, onClick: () => setEditClient({ name: c.name, phone: c.phone }) },
+                              { divider: true },
+                              { label: 'Excluir cliente', icon: <Trash2 size={16} />, danger: true, onClick: () => setConfirmDel({ type: 'client', item: c.name }) },
+                            ]} />
                           </td>
                         </tr>
                       );
@@ -337,25 +310,12 @@ export default function ClientManager({ loans, onChanged }: { loans: Loan[]; onC
                         <span className="mobile-card-value" style={{ color: 'var(--gold)' }}>{money(c.totalAReceber)}</span>
                       </div>
                       <div className="mobile-card-actions" onClick={e => e.stopPropagation()}>
-                        <div className="action-menu-wrap">
-                          <button className="action-menu-btn" onClick={() => setOpenMenu(openMenu === c.name ? null : c.name)}>
-                            <MoreHorizontal size={16} />
-                          </button>
-                          {openMenu === c.name && (
-                            <div className="action-menu open">
-                              <button className="action-menu-item" onClick={() => { setOpenMenu(null); setSelected(c.name); }}>
-                                <Search size={16} /> Ver detalhes
-                              </button>
-                              <button className="action-menu-item" onClick={() => { setOpenMenu(null); setEditClient({ name: c.name, phone: c.phone }); }}>
-                                <Edit size={16} /> Editar cliente
-                              </button>
-                              <div className="action-menu-divider" />
-                              <button className="action-menu-item danger" onClick={() => { setOpenMenu(null); setConfirmDel({ type: 'client', item: c.name }); }}>
-                                <Trash2 size={16} /> Excluir cliente
-                              </button>
-                            </div>
-                          )}
-                        </div>
+                        <ActionMenu iconSize={16} items={[
+                          { label: 'Ver detalhes', icon: <Search size={16} />, onClick: () => setSelected(c.name) },
+                          { label: 'Editar cliente', icon: <Edit size={16} />, onClick: () => setEditClient({ name: c.name, phone: c.phone }) },
+                          { divider: true },
+                          { label: 'Excluir cliente', icon: <Trash2 size={16} />, danger: true, onClick: () => setConfirmDel({ type: 'client', item: c.name }) },
+                        ]} />
                       </div>
                     </div>
                   );
@@ -445,41 +405,18 @@ export default function ClientManager({ loans, onChanged }: { loans: Loan[]; onC
                           <span className={`badge ${corBadge}`}>{sit}</span>
                         </td>
                         <td style={{ textAlign: 'center' }}>
-                          <div className="action-menu-wrap">
-                            <button className="action-menu-btn" onClick={() => setOpenMenu(openMenu === l.id ? null : l.id)}>
-                              <MoreHorizontal size={18} />
-                            </button>
-                            {openMenu === l.id && (
-                              <div className="action-menu open">
-                                <button className="action-menu-item" onClick={() => { setOpenMenu(null); setEditContract({ ...l }); }}>
-                                  <Edit size={16} /> Editar contrato
-                                </button>
-                                <button className="action-menu-item" onClick={() => changeDueDate(l)} disabled={!!busy}>
-                                  <Calendar size={16} /> Alterar vencimento
-                                </button>
-                                {l.status === 'Pendente' && (
-                                  <>
-                                    <button className="action-menu-item" disabled={!!busy} onClick={() => act(l, 'interest')}>
-                                      <DollarSign size={16} /> Receber juros
-                                    </button>
-                                    <button className="action-menu-item" disabled={!!busy} onClick={() => act(l, 'renew')}>
-                                      <RefreshCw size={16} /> Renovar contrato
-                                    </button>
-                                    <button className="action-menu-item" disabled={!!busy} onClick={() => act(l, 'paid')}>
-                                      <CheckCircle size={16} /> Quitar contrato
-                                    </button>
-                                    <button className="action-menu-item" disabled={!!busy} onClick={() => act(l, 'duplicate')}>
-                                      <Copy size={16} /> Duplicar contrato
-                                    </button>
-                                  </>
-                                )}
-                                <div className="action-menu-divider" />
-                                <button className="action-menu-item danger" disabled={!!busy} onClick={() => act(l, 'delete')}>
-                                  <Trash2 size={16} /> Excluir contrato
-                                </button>
-                              </div>
-                            )}
-                          </div>
+                          <ActionMenu items={[
+                            { label: 'Editar contrato', icon: <Edit size={16} />, onClick: () => setEditContract({ ...l }) },
+                            { label: 'Alterar vencimento', icon: <Calendar size={16} />, onClick: () => changeDueDate(l), disabled: !!busy },
+                            ...(l.status === 'Pendente' ? [
+                              { label: 'Receber juros', icon: <DollarSign size={16} />, onClick: () => act(l, 'interest'), disabled: !!busy },
+                              { label: 'Renovar contrato', icon: <RefreshCw size={16} />, onClick: () => act(l, 'renew'), disabled: !!busy },
+                              { label: 'Quitar contrato', icon: <CheckCircle size={16} />, onClick: () => act(l, 'paid'), disabled: !!busy },
+                              { label: 'Duplicar contrato', icon: <Copy size={16} />, onClick: () => act(l, 'duplicate'), disabled: !!busy },
+                            ] : []),
+                            { divider: true },
+                            { label: 'Excluir contrato', icon: <Trash2 size={16} />, danger: true, onClick: () => act(l, 'delete'), disabled: !!busy },
+                          ]} />
                         </td>
                       </tr>
                     );
@@ -518,41 +455,18 @@ export default function ClientManager({ loans, onChanged }: { loans: Loan[]; onC
                       <span className="mobile-card-value">{localDate(l.data_vencimento)}</span>
                     </div>
                     <div className="mobile-card-actions">
-                      <div className="action-menu-wrap">
-                        <button className="action-menu-btn" onClick={() => setOpenMenu(openMenu === l.id ? null : l.id)}>
-                          <MoreHorizontal size={16} />
-                        </button>
-                        {openMenu === l.id && (
-                          <div className="action-menu open">
-                            <button className="action-menu-item" onClick={() => { setOpenMenu(null); setEditContract({ ...l }); }}>
-                              <Edit size={16} /> Editar contrato
-                            </button>
-                            <button className="action-menu-item" onClick={() => changeDueDate(l)} disabled={!!busy}>
-                              <Calendar size={16} /> Alterar vencimento
-                            </button>
-                            {l.status === 'Pendente' && (
-                              <>
-                                <button className="action-menu-item" disabled={!!busy} onClick={() => act(l, 'interest')}>
-                                  <DollarSign size={16} /> Receber juros
-                                </button>
-                                <button className="action-menu-item" disabled={!!busy} onClick={() => act(l, 'renew')}>
-                                  <RefreshCw size={16} /> Renovar contrato
-                                </button>
-                                <button className="action-menu-item" disabled={!!busy} onClick={() => act(l, 'paid')}>
-                                  <CheckCircle size={16} /> Quitar contrato
-                                </button>
-                                <button className="action-menu-item" disabled={!!busy} onClick={() => act(l, 'duplicate')}>
-                                  <Copy size={16} /> Duplicar contrato
-                                </button>
-                              </>
-                            )}
-                            <div className="action-menu-divider" />
-                            <button className="action-menu-item danger" disabled={!!busy} onClick={() => act(l, 'delete')}>
-                              <Trash2 size={16} /> Excluir contrato
-                            </button>
-                          </div>
-                        )}
-                      </div>
+                      <ActionMenu iconSize={16} items={[
+                        { label: 'Editar contrato', icon: <Edit size={16} />, onClick: () => setEditContract({ ...l }) },
+                        { label: 'Alterar vencimento', icon: <Calendar size={16} />, onClick: () => changeDueDate(l), disabled: !!busy },
+                        ...(l.status === 'Pendente' ? [
+                          { label: 'Receber juros', icon: <DollarSign size={16} />, onClick: () => act(l, 'interest'), disabled: !!busy },
+                          { label: 'Renovar contrato', icon: <RefreshCw size={16} />, onClick: () => act(l, 'renew'), disabled: !!busy },
+                          { label: 'Quitar contrato', icon: <CheckCircle size={16} />, onClick: () => act(l, 'paid'), disabled: !!busy },
+                          { label: 'Duplicar contrato', icon: <Copy size={16} />, onClick: () => act(l, 'duplicate'), disabled: !!busy },
+                        ] : []),
+                        { divider: true },
+                        { label: 'Excluir contrato', icon: <Trash2 size={16} />, danger: true, onClick: () => act(l, 'delete'), disabled: !!busy },
+                      ]} />
                     </div>
                   </div>
                 );

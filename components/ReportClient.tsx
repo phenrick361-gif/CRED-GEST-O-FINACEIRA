@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
-import { interest, money, situation, total, parseCurrencyBR, parsePercentageBR } from '@/lib/finance';
+import { interest, money, situation, total, parseCurrencyBR, parsePercentageBR, localISODate } from '@/lib/finance';
 import type { Loan } from '@/types';
 import Papa from 'papaparse';
 
@@ -298,8 +298,8 @@ export default function ReportClient({ loans }: { loans: Loan[] }) {
           telefone: item.telefone || null,
           valor_emprestado: item.principal,
           porcentagem_juros: item.taxa,
-          data_vencimento: item.vencimento || new Date().toISOString().slice(0, 10),
-          data_emprestimo: new Date().toISOString().slice(0, 10),
+          data_vencimento: item.vencimento || localISODate(),
+          data_emprestimo: localISODate(),
           status: item.status,
           descricao: 'Emprestimo',
           prazo_meses: 1,

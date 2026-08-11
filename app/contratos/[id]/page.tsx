@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, notFound } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
+import { LOAN_COLUMNS } from '@/lib/supabase/columns';
 import AppShell from '@/components/AppShell';
 import LoanForm from '@/components/LoanForm';
 import type { Loan } from '@/types';
@@ -16,9 +17,15 @@ export default function EditLoanPage() {
     const supabase = createClient();
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (!user) { setLoan(null); return; }
-      supabase.from('emprestimos').select('*').eq('id', id).eq('user_id', user.id).maybeSingle().then(({ data }) => {
-        setLoan(data as Loan || null);
-      });
+      supabase
+        .from('emprestimos')
+        .select(LOAN_COLUMNS)
+        .eq('id', id)
+        .eq('user_id', user.id)
+        .maybeSingle()
+        .then(({ data }) => {
+          setLoan(data as Loan || null);
+        });
     });
   }, [id]);
 

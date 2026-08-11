@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { LOAN_COLUMNS } from '@/lib/supabase/columns';
 import { isoToday, localDate, money, situation, total, formatName } from '@/lib/finance';
 import type { Loan } from '@/types';
 import AppShell from '@/components/AppShell';
@@ -18,19 +19,40 @@ function getInitials(name: string): string {
 export default function Dashboard() {
   const [loans, setLoans] = useState<Loan[]>([]);
   const [userName, setUserName] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
 
-  useEffect(() => {
+  const load = useCallback(() => {
     const supabase = createClient();
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (!user) return;
       supabase.from('profiles').select('nome').eq('id', user.id).maybeSingle().then(({ data }) => {
         setUserName(data?.nome || '');
       });
-      supabase.from('emprestimos').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).then(({ data }) => {
-        setLoans((data || []) as Loan[]);
-      });
+      supabase
+        .from('emprestimos')
+        .select(LOAN_COLUMNS)
+        .eq('user_id', user.id)
+        .order('data_emprestimo', { ascending: false })
+        .then(({ data, error }) => {
+          if (error) { setErrorMsg(error.message); return; }
+          setErrorMsg('');
+          setLoans((data || []) as Loan[]);
+        });
     });
   }, []);
+
+  useEffect(() => {
+    load();
+    const onChanged = () => load();
+    window.addEventListener('cred-data-changed', onChanged);
+    window.addEventListener('focus', onChanged);
+    document.addEventListener('visibilitychange', onChanged);
+    return () => {
+      window.removeEventListener('cred-data-changed', onChanged);
+      window.removeEventListener('focus', onChanged);
+      document.removeEventListener('visibilitychange', onChanged);
+    };
+  }, [load]);
 
 
   const today = isoToday();
@@ -92,6 +114,10 @@ export default function Dashboard() {
           </div>
         ))}
       </section>
+
+      {errorMsg && (
+        <div className="error" style={{ marginBottom: 16 }}>Erro ao carregar dados: {errorMsg}</div>
+      )}
 
       <section className="dashboard-lower-grid">
         <div className="panel dashboard-charges-card">

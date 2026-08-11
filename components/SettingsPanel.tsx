@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
+import { LOAN_COLUMNS } from '@/lib/supabase/columns';
 import { interest, money, total as calcTotal } from '@/lib/finance';
 import type { Loan } from '@/types';
 import { User, Shield, Palette, Database, Trash2, AlertTriangle, Wrench, Key, Bell } from 'lucide-react';
@@ -52,7 +53,7 @@ export default function SettingsPanel() {
     try {
       const { data: { user }, error: authError } = await supabase.auth.getUser();
       if (authError || !user) throw new Error('Usuário não autenticado.');
-      const { data, error: dbError } = await supabase.from('emprestimos').select('*').eq('user_id', user.id).order('cliente');
+      const { data, error: dbError } = await supabase.from('emprestimos').select(LOAN_COLUMNS).eq('user_id', user.id).order('cliente');
       if (dbError) throw new Error(`Erro ao carregar contratos: ${dbError.message}`);
       setContracts((data || []) as Loan[]); setRepairOpen(true);
     } catch (err: any) { setError(err.message); }
