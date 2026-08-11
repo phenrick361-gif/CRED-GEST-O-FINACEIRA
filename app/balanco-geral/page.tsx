@@ -2,34 +2,33 @@
 
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { LOAN_COLUMNS } from '@/lib/supabase/columns';
+import { LOAN_COLUMNS, PAGAMENTO_COLUMNS } from '@/lib/supabase/columns';
+import { fetchAllRows } from '@/lib/supabase/fetchAll';
 import { interest, isoToday, localDate, money, total, hasInterest } from '@/lib/finance';
-import type { Loan } from '@/types';
+import type { Loan, Pagamento } from '@/types';
 import AppShell from '@/components/AppShell';
+import ProfitSection from '@/components/ProfitSection';
 import { BarChartCard, DonutChartCard, MonthlyChartCard } from '@/components/DashboardCharts';
 import { DollarSign, Briefcase, TrendingUp, PiggyBank, FileText, Percent, CheckCircle, AlertTriangle, Award } from 'lucide-react';
 
 export default function BalancoGeral() {
   const [loans, setLoans] = useState<Loan[]>([]);
-  const [pagamentos, setPagamentos] = useState<{ valor: number }[]>([]);
+  const [pagamentos, setPagamentos] = useState<Pagamento[]>([]);
   const [errorMsg, setErrorMsg] = useState('');
 
   const load = () => {
     const supabase = createClient();
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (!user) return;
-      supabase
-        .from('emprestimos')
-        .select(LOAN_COLUMNS)
-        .eq('user_id', user.id)
-        .order('data_emprestimo', { ascending: false })
-        .then(({ data, error }) => {
-          if (error) { setErrorMsg(error.message); return; }
-          setLoans((data || []) as Loan[]);
-        });
-      supabase.from('pagamentos').select('valor').eq('user_id', user.id).eq('tipo', 'Juros').then(({ data, error }) => {
-        if (error) { setErrorMsg(error.message); return; }
-        setPagamentos((data || []) as { valor: number }[]);
+      Promise.all([
+        fetchAllRows(supabase.from('emprestimos').select(LOAN_COLUMNS).eq('user_id', user.id).order('data_emprestimo', { ascending: false })),
+        fetchAllRows(supabase.from('pagamentos').select(PAGAMENTO_COLUMNS).eq('user_id', user.id)),
+      ]).then(([loansData, pagamentosData]) => {
+        setLoans(loansData as Loan[]);
+        setPagamentos(pagamentosData as Pagamento[]);
+        setErrorMsg('');
+      }).catch((error: any) => {
+        setErrorMsg(error?.message || 'Erro ao carregar dados');
       });
     });
   };
@@ -70,7 +69,7 @@ export default function BalancoGeral() {
     if (loan.data_vencimento < today) contratosAtrasados++;
   });
 
-  const jurosRecebidos = pagamentos.reduce((s, p) => s + Number(p.valor), 0);
+  const jurosRecebidos = pagamentos.filter(p => p.tipo === 'Juros').reduce((s, p) => s + Number(p.valor), 0);
   const contratosAtivos = pendentes.length;
   const contratosPagos = pagos.length;
   const emDiaCount = pendentes.filter(l => l.data_vencimento >= today).length;
@@ -172,6 +171,11 @@ export default function BalancoGeral() {
           <div className="muted">Contratos com vencimento ultrapassado.</div>
         </div>
       </section>
+
+      <div className="section-spacer-lg" />
+
+      {/* Lucro mensal — análise mês a mês */}
+      <ProfitSection loans={loans} pagamentos={pagamentos} />
 
       <div className="section-spacer-lg" />
 

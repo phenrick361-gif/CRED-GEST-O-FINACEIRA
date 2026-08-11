@@ -28,3 +28,13 @@ export type Profile = {
   teste_ate: string;
   is_admin: boolean;
 };
+
+export type Pagamento = {
+  id: string | number;
+  user_id: string;
+  emprestimo_id: string | null;
+  tipo: 'Juros' | 'Total' | 'Parcial' | string;
+  valor: number;
+  pago_em: string;
+  observacao: string | null;
+};
