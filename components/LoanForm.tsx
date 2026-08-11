@@ -31,8 +31,12 @@ function validatePhone(phone: string): boolean {
   return phoneRegex.test(phone) || phone.trim() === '';
 }
 
+function stripDangerous(input: string): string {
+  return input.replace(/[<>]/g, '');
+}
+
 function sanitizeInput(input: string): string {
-  return input.replace(/[<>]/g, '').trim();
+  return stripDangerous(input).trim();
 }
 
 function validateLoanForm(formData: any): { valid: boolean; errors: string[] } {
@@ -84,7 +88,7 @@ export default function LoanForm({ initial, id }: { initial?: Initial; id?: stri
   };
 
   const change = (key: string, value: string) => {
-    const sanitizedValue = sanitizeInput(value);
+    const sanitizedValue = stripDangerous(value);
     setForm(prev => {
       let next = { ...prev, [key]: sanitizedValue };
       if (key === 'data_emprestimo' || key === 'prazo_meses') {
@@ -108,13 +112,6 @@ export default function LoanForm({ initial, id }: { initial?: Initial; id?: stri
     setError('');
     setValidationErrors([]);
 
-    const validation = validateLoanForm(form);
-    if (!validation.valid) {
-      setValidationErrors(validation.errors);
-      setLoading(false);
-      return;
-    }
-
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { router.replace('/login'); return; }
@@ -123,10 +120,21 @@ export default function LoanForm({ initial, id }: { initial?: Initial; id?: stri
       const payload = {
         ...form,
         user_id: user.id,
+        cliente: form.cliente.trim(),
+        telefone: form.telefone.trim(),
+        descricao: form.descricao.trim(),
+        observacao: (form.observacao || '').trim(),
         valor_emprestado: Number(form.valor_emprestado),
         porcentagem_juros: Number(form.porcentagem_juros),
         prazo_meses: Number(form.prazo_meses)
       };
+
+      const validation = validateLoanForm(payload);
+      if (!validation.valid) {
+        setValidationErrors(validation.errors);
+        setLoading(false);
+        return;
+      }
 
       let result;
       if (id) {
