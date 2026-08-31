@@ -6,8 +6,38 @@ import { createClient } from '@/lib/supabase/client';
 import type { Loan, ContractType } from '@/types';
 import { User, DollarSign, Calendar, FileText, Layers } from 'lucide-react';
 import { money } from '@/lib/finance';
+import {
+  calculateInstallmentPlan,
+  generateInstallmentDates,
+  type InstallmentPeriodicity,
+} from '@/lib/installments';
 
-type Initial = Partial<Loan>;
+export type LoanFormInitial = Partial<Loan> & {
+  numero_parcelas?: string | number;
+  valor_parcela?: string | number;
+  primeiro_vencimento?: string;
+  total_parcelas?: string | number;
+};
+
+type LoanFormState = {
+  cliente: string;
+  telefone: string;
+  observacao: string;
+  descricao: string;
+  valor_emprestado: string;
+  porcentagem_juros: string;
+  juros_aplicado: string;
+  modalidade: string;
+  periodicidade: string;
+  prazo_meses: string;
+  data_emprestimo: string;
+  data_vencimento: string;
+  status: string;
+  contract_type: ContractType;
+  numero_parcelas: string;
+  valor_parcela: string;
+  primeiro_vencimento: string;
+};
 
 function formatLocalDate(d: Date): string {
   const y = d.getFullYear();
@@ -40,38 +70,42 @@ function sanitizeInput(input: string): string {
   return stripDangerous(input).trim();
 }
 
-function validateLoanForm(formData: any): { valid: boolean; errors: string[] } {
+function validateLoanForm(formData: LoanFormState, validateInstallmentPlan = true): { valid: boolean; errors: string[] } {
   const errors: string[] = [];
   if (!formData.cliente || formData.cliente.trim() === '') { errors.push('Nome do cliente é obrigatório'); }
-  if (!formData.valor_emprestado || formData.valor_emprestado <= 0) { errors.push('Valor do empréstimo deve ser maior que zero'); }
-  if (!formData.porcentagem_juros || formData.porcentagem_juros < 0) { errors.push('Taxa de juros deve ser não negativa'); }
-  if (!formData.prazo_meses || formData.prazo_meses < 1) { errors.push('Prazo deve ser de pelo menos 1 mês'); }
+  const principal = Number(formData.valor_emprestado);
+  const interestRate = Number(formData.porcentagem_juros);
+  const term = Number(formData.prazo_meses);
+  if (!Number.isFinite(principal) || principal <= 0) { errors.push('Valor do empréstimo deve ser maior que zero'); }
+  if (formData.contract_type === 'normal' && (!Number.isFinite(interestRate) || interestRate < 0)) { errors.push('Taxa de juros deve ser não negativa'); }
+  if (!Number.isFinite(term) || term < 1) { errors.push('Prazo deve ser de pelo menos 1 mês'); }
   if (!validatePhone(formData.telefone) && formData.telefone.trim() !== '') { errors.push('Formato de telefone inválido. Use: (XX) 9XXXX-XXXX'); }
-  if (formData.data_emprestimo && formData.data_vencimento) {
+  if (formData.contract_type === 'normal' && formData.data_emprestimo && formData.data_vencimento) {
     const startDate = new Date(formData.data_emprestimo);
     const endDate = new Date(formData.data_vencimento);
     if (startDate >= endDate) { errors.push('Data de vencimento deve ser posterior à data do empréstimo'); }
   }
-  const valorEmpestado = Number(formData.valor_emprestado);
-  if (valorEmpestado > 1000000) { errors.push('Valor máximo do empréstimo é R$ 1.000.000'); }
-  if (formData.contract_type === 'installment') {
-    if (!formData.numero_parcelas || formData.numero_parcelas < 1) { errors.push('Número de parcelas é obrigatório'); }
-    if (!formData.valor_parcela || formData.valor_parcela <= 0) { errors.push('Valor da parcela deve ser maior que zero'); }
+  if (principal > 1000000) { errors.push('Valor máximo do empréstimo é R$ 1.000.000'); }
+  if (formData.contract_type === 'installment' && validateInstallmentPlan) {
+    const installmentCount = Number(formData.numero_parcelas);
+    const installmentAmount = Number(formData.valor_parcela);
+    if (!Number.isInteger(installmentCount) || installmentCount < 1 || installmentCount > 600) { errors.push('Número de parcelas deve estar entre 1 e 600'); }
+    if (!Number.isFinite(installmentAmount) || installmentAmount <= 0) { errors.push('Valor da parcela deve ser maior que zero'); }
     if (!formData.primeiro_vencimento) { errors.push('Primeiro vencimento é obrigatório'); }
+    if (formData.primeiro_vencimento && formData.data_emprestimo && formData.primeiro_vencimento < formData.data_emprestimo) {
+      errors.push('Primeiro vencimento não pode ser anterior à data do empréstimo');
+    }
+    if (Number.isFinite(principal) && Number.isFinite(installmentAmount) && installmentCount > 0 && installmentAmount * installmentCount < principal) {
+      errors.push('O total das parcelas não pode ser menor que o valor principal');
+    }
   }
   return { valid: errors.length === 0, errors };
 }
 
-export default function LoanForm({ initial, id }: { initial?: Partial<Loan> & { numero_parcelas?: string; valor_parcela?: string; primeiro_vencimento?: string }; id?: string }) {
+export default function LoanForm({ initial, id }: { initial?: LoanFormInitial; id?: string }) {
   const router = useRouter();
   const today = formatLocalDate(new Date());
-  const [form, setForm] = useState<{
-    cliente: string; telefone: string; observacao: string; descricao: string;
-    valor_emprestado: string; porcentagem_juros: string; juros_aplicado: string;
-    modalidade: string; periodicidade: string; prazo_meses: string;
-    data_emprestimo: string; data_vencimento: string; status: string;
-    contract_type: ContractType; numero_parcelas: string; valor_parcela: string; primeiro_vencimento: string;
-  }>({
+  const [form, setForm] = useState<LoanFormState>({
     cliente: initial?.cliente ? sanitizeInput(initial.cliente) : '',
     telefone: initial?.telefone ? sanitizeInput(initial.telefone) : '',
     observacao: initial?.observacao ? sanitizeInput(initial.observacao) : '',
@@ -94,6 +128,7 @@ export default function LoanForm({ initial, id }: { initial?: Partial<Loan> & { 
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const autoVencimento = useRef(true);
+  const installmentPlanLocked = Boolean(id && initial?.contract_type === 'installment');
 
   const recalcVencimento = (nextForm: typeof form) => {
     try {
@@ -117,7 +152,7 @@ export default function LoanForm({ initial, id }: { initial?: Partial<Loan> & { 
     });
     if (validationErrors.length > 0) {
       const newForm = { ...form, [key]: sanitizedValue };
-      const validation = validateLoanForm(newForm);
+      const validation = validateLoanForm(newForm, !installmentPlanLocked);
       if (validation.valid) { setValidationErrors([]); }
     }
   };
@@ -137,76 +172,88 @@ export default function LoanForm({ initial, id }: { initial?: Partial<Loan> & { 
       const valorEmprestado = Number(form.valor_emprestado);
       const numeroParcelas = isInstallment ? parseInt(form.numero_parcelas || '0', 10) : 0;
       const valorParcela = isInstallment ? Number(form.valor_parcela) : 0;
-      const totalReceber = isInstallment ? valorParcela * numeroParcelas : 0;
+      const validation = validateLoanForm(form, !installmentPlanLocked);
+      if (!validation.valid) {
+        setValidationErrors(validation.errors);
+        return;
+      }
 
-      const payload: any = {
-        ...form,
+      const installmentPlan = isInstallment && !id
+        ? calculateInstallmentPlan(valorEmprestado, numeroParcelas, valorParcela)
+        : null;
+      const installmentDates = isInstallment && !id
+        ? generateInstallmentDates(
+            form.primeiro_vencimento,
+            numeroParcelas,
+            form.periodicidade as InstallmentPeriodicity,
+          )
+        : [];
+
+      const payload = {
         user_id: user.id,
         cliente: form.cliente.trim(),
         telefone: form.telefone.trim(),
         descricao: form.descricao.trim(),
         observacao: (form.observacao || '').trim(),
         valor_emprestado: valorEmprestado,
-        porcentagem_juros: Number(form.porcentagem_juros),
+        porcentagem_juros: installmentPlan?.interestPercentage ?? Number(initial?.porcentagem_juros ?? form.porcentagem_juros),
+        juros_aplicado: form.juros_aplicado,
+        modalidade: isInstallment ? 'Parcelado' : form.modalidade,
+        periodicidade: form.periodicidade,
         prazo_meses: Number(form.prazo_meses),
+        data_emprestimo: form.data_emprestimo,
+        data_vencimento: isInstallment
+          ? (id ? initial?.data_vencimento || form.data_vencimento : installmentDates[installmentDates.length - 1])
+          : form.data_vencimento,
+        status: isInstallment && !id ? 'Pendente' : form.status,
         contract_type: form.contract_type,
-        numero_parcelas: isInstallment ? numeroParcelas : null,
-        valor_parcela: isInstallment ? valorParcela : null,
-        primeiro_vencimento: isInstallment ? form.primeiro_vencimento : null,
-        status: isInstallment ? 'Pendente' : form.status,
       };
 
-      if (!isInstallment) {
-        delete payload.numero_parcelas;
-        delete payload.valor_parcela;
-        delete payload.primeiro_vencimento;
-      }
-
-      const validation = validateLoanForm(payload);
-      if (!validation.valid) {
-        setValidationErrors(validation.errors);
-        setLoading(false);
-        return;
-      }
-
-      let result: any;
       if (id) {
-        result = await supabase.from('emprestimos').update(payload).eq('id', id).eq('user_id', user.id);
+        const { error: updateError } = await supabase
+          .from('emprestimos')
+          .update(payload)
+          .eq('id', id)
+          .eq('user_id', user.id);
+        if (updateError) throw new Error(updateError.message);
       } else {
-        result = await supabase.from('emprestimos').insert(payload);
-      }
+        const { data: createdContract, error: contractError } = await supabase
+          .from('emprestimos')
+          .insert(payload)
+          .select('id')
+          .single();
+        if (contractError) throw new Error(contractError.message);
 
-      if (result.error) { throw new Error(result.error.message); }
+        if (isInstallment) {
+          const contractId = createdContract.id;
 
-      if (!id && isInstallment && result.data && result.data[0]) {
-        const contractId = result.data[0].id;
-        const installmentDates: string[] = [];
-        const baseDate = new Date(`${form.primeiro_vencimento}T12:00:00`);
-        for (let i = 0; i < numeroParcelas; i++) {
-          const d = new Date(baseDate);
-          d.setMonth(d.getMonth() + i);
-          const y = d.getFullYear();
-          const m = String(d.getMonth() + 1).padStart(2, '0');
-          const day = String(d.getDate()).padStart(2, '0');
-          installmentDates.push(`${y}-${m}-${day}`);
+          const installmentRows = installmentDates.map((dueDate, idx) => ({
+            contract_id: contractId,
+            user_id: user.id,
+            installment_number: idx + 1,
+            amount: valorParcela,
+            due_date: dueDate,
+            paid_at: null,
+            status: 'A vencer' as const,
+          }));
+
+          const { error: installmentError } = await supabase.from('installments').insert(installmentRows);
+          if (installmentError) {
+            const { error: cleanupError } = await supabase
+              .from('emprestimos')
+              .delete()
+              .eq('id', contractId)
+              .eq('user_id', user.id);
+            const cleanupMessage = cleanupError
+              ? ' O contrato principal não pôde ser removido automaticamente; revise-o antes de tentar novamente.'
+              : ' O contrato principal foi revertido para não deixar dados incompletos.';
+            throw new Error(`Não foi possível criar as parcelas: ${installmentError.message}.${cleanupMessage}`);
+          }
         }
-
-        const installmentRows = installmentDates.map((dueDate, idx) => ({
-          contract_id: contractId,
-          user_id: user.id,
-          installment_number: idx + 1,
-          amount: valorParcela,
-          due_date: dueDate,
-          paid_at: null,
-          status: 'A vencer' as const,
-        }));
-
-        const { error: instError } = await supabase.from('installments').insert(installmentRows);
-        if (instError) throw new Error(instError.message);
       }
 
       if (typeof window !== 'undefined') window.dispatchEvent(new Event('cred-data-changed'));
-      router.push('/contratos');
+      router.push(isInstallment ? '/parcelados' : '/contratos');
       router.refresh();
     } catch (err: any) {
       setError(err.message || 'Ocorreu um erro ao salvar');
@@ -222,7 +269,25 @@ export default function LoanForm({ initial, id }: { initial?: Partial<Loan> & { 
   const isInstallment = form.contract_type === 'installment';
   const numParcelas = parseInt(form.numero_parcelas || '0', 10);
   const valParcela = Number(form.valor_parcela || '0');
-  const totalReceber = isInstallment ? valParcela * numParcelas : 0;
+  const totalReceber = isInstallment
+    ? Number(installmentPlanLocked ? initial?.total_parcelas ?? valParcela * numParcelas : valParcela * numParcelas)
+    : 0;
+  const jurosParcelado = isInstallment ? Math.max(totalReceber - valor, 0) : 0;
+  const taxaParcelado = installmentPlanLocked
+    ? Number(initial?.porcentagem_juros ?? form.porcentagem_juros)
+    : isInstallment && valor > 0 ? (jurosParcelado / valor) * 100 : 0;
+  const totalExibido = isInstallment ? totalReceber : totalCalculado;
+  const installmentDatesPreview = isInstallment && form.primeiro_vencimento && numParcelas > 0 && numParcelas <= 600
+    ? (() => {
+        try {
+          return generateInstallmentDates(form.primeiro_vencimento, numParcelas, form.periodicidade as InstallmentPeriodicity);
+        } catch {
+          return [];
+        }
+      })()
+    : [];
+  const lastInstallmentDueDate = installmentDatesPreview[installmentDatesPreview.length - 1] || '';
+  const installmentDisplayDueDate = lastInstallmentDueDate || (installmentPlanLocked ? form.data_vencimento : '');
 
   return (
     <div className="loan-form-layout">
@@ -277,22 +342,24 @@ export default function LoanForm({ initial, id }: { initial?: Partial<Loan> & { 
               />
             </div>
             <div className="field">
-              <label>Taxa de juros (%) *</label>
+              <label>{isInstallment ? 'Taxa efetiva calculada (%)' : 'Taxa de juros (%) *'}</label>
               <input
                 className={`input ${validationErrors.some(e => e.includes('juros')) ? 'error' : ''}`}
                 type="number" min="0" step="0.01"
-                value={form.porcentagem_juros}
+                value={isInstallment ? taxaParcelado.toFixed(2) : form.porcentagem_juros}
                 onChange={e => change('porcentagem_juros', e.target.value)}
-                required
+                readOnly={isInstallment}
+                disabled={isInstallment}
+                required={!isInstallment}
               />
             </div>
             <div className="field">
               <label>Valor dos juros</label>
-              <input className="input" type="text" value={new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(jurosCalculado)} readOnly disabled style={{ opacity: 0.7 }} />
+              <input className="input" type="text" value={money(isInstallment ? jurosParcelado : jurosCalculado)} readOnly disabled style={{ opacity: 0.7 }} />
             </div>
             <div className="field">
               <label>Valor total</label>
-              <input className="input" type="text" value={new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalCalculado)} readOnly disabled style={{ opacity: 0.7 }} />
+              <input className="input" type="text" value={money(totalExibido)} readOnly disabled style={{ opacity: 0.7 }} />
             </div>
           </div>
         </div>
@@ -304,14 +371,14 @@ export default function LoanForm({ initial, id }: { initial?: Partial<Loan> & { 
           <div className="form-grid">
             <div className="field">
               <label>Tipo de Contrato *</label>
-              <select className="select" value={form.contract_type} onChange={e => change('contract_type', e.target.value)}>
+              <select className="select" value={form.contract_type} onChange={e => change('contract_type', e.target.value)} disabled={Boolean(id)}>
                 <option value="normal">Normal</option>
                 <option value="installment">Parcelado</option>
               </select>
             </div>
             <div className="field">
               <label>Modalidade</label>
-              <select className="select" value={form.modalidade} onChange={e => change('modalidade', e.target.value)}>
+              <select className="select" value={isInstallment ? 'Parcelado' : form.modalidade} onChange={e => change('modalidade', e.target.value)} disabled={isInstallment}>
                 <option>Pag. Único</option>
                 <option>Parcelado</option>
               </select>
@@ -333,6 +400,7 @@ export default function LoanForm({ initial, id }: { initial?: Partial<Loan> & { 
                   value={form.numero_parcelas}
                   onChange={e => change('numero_parcelas', e.target.value)}
                   placeholder="10"
+                  disabled={installmentPlanLocked}
                   required
                 />
               </div>
@@ -344,6 +412,7 @@ export default function LoanForm({ initial, id }: { initial?: Partial<Loan> & { 
                   value={form.valor_parcela}
                   onChange={e => change('valor_parcela', e.target.value)}
                   placeholder="600"
+                  disabled={installmentPlanLocked}
                   required
                 />
               </div>
@@ -354,18 +423,24 @@ export default function LoanForm({ initial, id }: { initial?: Partial<Loan> & { 
                   type="date"
                   value={form.primeiro_vencimento}
                   onChange={e => change('primeiro_vencimento', e.target.value)}
+                  disabled={installmentPlanLocked}
                   required
                 />
               </div>
               <div className="field">
                 <label>Periodicidade</label>
-                <select className="select" value={form.periodicidade} onChange={e => change('periodicidade', e.target.value)}>
+                <select className="select" value={form.periodicidade} onChange={e => change('periodicidade', e.target.value)} disabled={installmentPlanLocked}>
                   <option>Mensal</option>
                   <option>Quinzenal</option>
                   <option>Semanal</option>
                 </select>
               </div>
             </div>
+            {installmentPlanLocked && (
+              <div className="muted" style={{ marginTop: 10 }}>
+                O plano de parcelas existente é preservado. Cliente, telefone e observações continuam editáveis.
+              </div>
+            )}
             {totalReceber > 0 && (
               <div style={{ marginTop: 10, padding: '10px 14px', background: 'rgba(212,175,55,0.06)', borderRadius: 10, border: '1px solid rgba(212,175,55,0.15)' }}>
                 <span style={{ color: 'var(--text-secondary)', fontSize: 13 }}>Total a receber: </span>
@@ -388,8 +463,9 @@ export default function LoanForm({ initial, id }: { initial?: Partial<Loan> & { 
               <label>Data de vencimento *</label>
               <input
                 className={`input ${validationErrors.some(e => e.includes('vencimento')) ? 'error' : ''}`}
-                type="date" value={form.data_vencimento}
+                type="date" value={isInstallment ? installmentDisplayDueDate : form.data_vencimento}
                 onChange={e => change('data_vencimento', e.target.value)}
+                disabled={isInstallment}
                 required
               />
             </div>
@@ -419,7 +495,7 @@ export default function LoanForm({ initial, id }: { initial?: Partial<Loan> & { 
           </div>
         </div>
 
-        {id && (
+        {id && !isInstallment && (
           <div style={{ marginBottom: 20 }}>
             <h4 style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 15, fontWeight: 700, color: 'var(--gold-light)', marginBottom: 16 }}>
               Status
@@ -481,15 +557,15 @@ export default function LoanForm({ initial, id }: { initial?: Partial<Loan> & { 
         )}
         <div className="loan-summary-row">
           <span className="loan-summary-label">Juros</span>
-          <span className="loan-summary-value">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(jurosCalculado)}</span>
+            <span className="loan-summary-value">{money(isInstallment ? jurosParcelado : jurosCalculado)}</span>
         </div>
         <div className="loan-summary-row">
           <span className="loan-summary-label">Total</span>
-          <span className="loan-summary-value" style={{ color: 'var(--gold)' }}>{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalCalculado)}</span>
+            <span className="loan-summary-value" style={{ color: 'var(--gold)' }}>{money(totalExibido)}</span>
         </div>
         <div className="loan-summary-row">
           <span className="loan-summary-label">Vencimento</span>
-          <span className="loan-summary-value">{form.data_vencimento ? new Intl.DateTimeFormat('pt-BR', { timeZone: 'UTC' }).format(new Date(`${form.data_vencimento}T00:00:00Z`)) : '—'}</span>
+          <span className="loan-summary-value">{(isInstallment ? installmentDisplayDueDate : form.data_vencimento) ? new Intl.DateTimeFormat('pt-BR', { timeZone: 'UTC' }).format(new Date(`${isInstallment ? installmentDisplayDueDate : form.data_vencimento}T00:00:00Z`)) : '—'}</span>
         </div>
       </div>
     </div>

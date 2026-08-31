@@ -47,10 +47,9 @@ export default function BalancoGeral() {
   }, []);
 
   const today = isoToday();
-  const pendentes = loans.filter(l => l.status === 'Pendente');
-  const pagos = loans.filter(l => l.status === 'Pago');
   const normais = loans.filter(l => l.contract_type !== 'installment');
   const normaisPendentes = normais.filter(l => l.status === 'Pendente');
+  const normaisPagos = normais.filter(l => l.status === 'Pago');
   const semJuros = normaisPendentes.filter(l => !hasInterest(l));
   const comJuros = normaisPendentes.filter(l => hasInterest(l));
 
@@ -72,13 +71,13 @@ export default function BalancoGeral() {
   });
 
   const jurosRecebidos = pagamentos.filter(p => p.tipo === 'Juros').reduce((s, p) => s + Number(p.valor), 0);
-  const contratosAtivos = pendentes.length;
-  const contratosPagos = pagos.length;
-  const emDiaCount = pendentes.filter(l => l.data_vencimento >= today).length;
+  const contratosAtivos = normaisPendentes.length;
+  const contratosPagos = normaisPagos.length;
+  const emDiaCount = normaisPendentes.filter(l => l.data_vencimento >= today).length;
   const atrasadosCount = contratosAtrasados;
 
   const monthlyMap = new Map<string, { principal: number; total: number }>();
-  loans.forEach(loan => {
+  normais.forEach(loan => {
     const month = loan.data_emprestimo.slice(0, 7);
     const prev = monthlyMap.get(month) || { principal: 0, total: 0 };
     prev.principal += Number(loan.valor_emprestado);
@@ -92,7 +91,7 @@ export default function BalancoGeral() {
     return { month, principal: data.principal, total: cumTotal, newTotal: data.total };
   });
 
-  const topLoans = [...pendentes].sort((a, b) => total(b) - total(a)).slice(0, 10);
+  const topLoans = [...normaisPendentes].sort((a, b) => total(b) - total(a)).slice(0, 10);
 
   return (
     <AppShell>
@@ -177,7 +176,7 @@ export default function BalancoGeral() {
       <div className="section-spacer-lg" />
 
       {/* Lucro mensal — análise mês a mês */}
-      <ProfitSection loans={loans} pagamentos={pagamentos} />
+      <ProfitSection loans={normais} pagamentos={pagamentos} />
 
       <div className="section-spacer-lg" />
 
@@ -296,7 +295,7 @@ export default function BalancoGeral() {
               <div className="kpi-compact-icon"><CheckCircle size={16} /></div>
               <div className="kpi-compact-label">Carteira paga</div>
             </div>
-            <div className="kpi-compact-value">{loans.length > 0 ? ((contratosPagos / loans.length) * 100).toFixed(1) : 0}%</div>
+            <div className="kpi-compact-value">{normais.length > 0 ? ((contratosPagos / normais.length) * 100).toFixed(1) : 0}%</div>
             <div className="muted">Percentual de contratos quitados.</div>
           </div>
           <div className="kpi-compact">
@@ -312,7 +311,7 @@ export default function BalancoGeral() {
               <div className="kpi-compact-icon"><FileText size={16} /></div>
               <div className="kpi-compact-label">Total de contratos</div>
             </div>
-            <div className="kpi-compact-value">{loans.length}</div>
+            <div className="kpi-compact-value">{normais.length}</div>
             <div className="muted">Todos os contratos cadastrados.</div>
           </div>
         </div>

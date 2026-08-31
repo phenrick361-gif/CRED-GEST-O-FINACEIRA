@@ -71,7 +71,7 @@ export function previstoPorMes(loans: Loan[]): Map<string, number> {
  */
 export function obtidoPorMes(loans: Loan[], pagamentos: Pagamento[]): Map<string, number> {
   const byId = new Map<string, Loan>();
-  for (const l of loans || []) if (l && l.id) byId.set(l.id, l);
+  for (const l of loans || []) if (l && l.id) byId.set(String(l.id), l);
 
   const map = new Map<string, number>();
   for (const p of pagamentos || []) {
@@ -81,7 +81,7 @@ export function obtidoPorMes(loans: Loan[], pagamentos: Pagamento[]): Map<string
     if (tipo === 'juros') {
       profit = Number(p.valor) || 0;
     } else if (tipo === 'total') {
-      const loan = p.emprestimo_id ? byId.get(p.emprestimo_id) : undefined;
+      const loan = p.emprestimo_id ? byId.get(String(p.emprestimo_id)) : undefined;
       if (loan) {
         const jurosContrato = interestOf(loan);
         const pago = Number(p.valor) || 0;

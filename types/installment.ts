@@ -2,7 +2,7 @@ export type InstallmentStatus = 'Paga' | 'A vencer' | 'Vence hoje' | 'Atrasada';
 
 export type Installment = {
   id: string;
-  contract_id: string;
+  contract_id: string | number;
   user_id: string;
   installment_number: number;
   amount: number;
@@ -14,7 +14,7 @@ export type Installment = {
 };
 
 export type InstallmentContract = {
-  id: string;
+  id: string | number;
   user_id: string;
   cliente: string;
   telefone: string | null;

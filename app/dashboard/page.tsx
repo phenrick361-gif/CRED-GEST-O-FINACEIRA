@@ -56,10 +56,9 @@ export default function Dashboard() {
 
 
   const today = isoToday();
-  const pendentes = loans.filter(l => l.status === 'Pendente');
-  const pagados = loans.filter(l => l.status === 'Pago');
   const normais = loans.filter(l => l.contract_type !== 'installment');
   const normaisPendentes = normais.filter(l => l.status === 'Pendente');
+  const normaisPagos = normais.filter(l => l.status === 'Pago');
 
   let capitalInvestido = 0;
   let totalCarteira = 0;
@@ -73,11 +72,11 @@ export default function Dashboard() {
     if (loan.data_vencimento === today) dueTodayLoans.push(loan);
   });
 
-  const contratosPagos = pagados.length;
-  const contratosAtivos = pendentes.length;
+  const contratosPagos = normaisPagos.length;
+  const contratosAtivos = normaisPendentes.length;
   const venceHojeCount = dueTodayLoans.length;
   const contratosAtrasadosCount = contratosAtrasados;
-  const ultimosContratos = loans.slice(0, 4);
+  const ultimosContratos = normais.slice(0, 4);
   const dueTodayPreview = dueTodayLoans.slice(0, 5);
 
   const cards = [

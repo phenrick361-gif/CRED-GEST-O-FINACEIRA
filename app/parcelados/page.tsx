@@ -7,15 +7,28 @@ import { LOAN_COLUMNS } from '@/lib/supabase/columns';
 import { fetchAllRows } from '@/lib/supabase/fetchAll';
 import { money, localDate, isoToday, getInstallmentStatus } from '@/lib/finance';
 import type { Loan, Installment } from '@/types';
+import { asAmount, daysOverdue, sameEntityId } from '@/lib/installments';
 import AppShell from '@/components/AppShell';
 import { InstallmentPieChart } from '@/components/InstallmentPieChart';
 import { InstallmentStats } from '@/components/InstallmentStats';
 import {
-  DollarSign, Briefcase, Clock, AlertTriangle, CheckCircle, Calendar,
-  Search, Filter, ChevronDown, ChevronUp, ArrowRight, PlusCircle,
+  AlertTriangle, CheckCircle,
+  Search, ChevronDown, PlusCircle,
   Receipt, BarChart3, X, Zap
 } from 'lucide-react';
 import Link from 'next/link';
+
+type InstallmentContractView = Loan & {
+  installments: Installment[];
+  total_paid: number;
+  total_amount: number;
+  remaining_amount: number;
+  paid_count: number;
+  total_count: number;
+  next_due_date: string | null;
+  next_amount: number;
+  progress: number;
+};
 
 export default function ParceladosPage() {
   const [loans, setLoans] = useState<Loan[]>([]);
@@ -24,20 +37,34 @@ export default function ParceladosPage() {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('Todos');
   const [loading, setLoading] = useState(true);
-  const [details, setDetails] = useState<{ loan: Loan & { total_amount: number; paid_count: number; total_count: number; total_paid: number }; installments: Installment[] } | null>(null);
+  const [details, setDetails] = useState<{ loan: InstallmentContractView; installments: Installment[] } | null>(null);
   const [payModal, setPayModal] = useState<{ installment: Installment; loan: Loan } | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [payingId, setPayingId] = useState<string | null>(null);
 
   const load = useCallback(() => {
+    setLoading(true);
     const supabase = createClient();
     supabase.auth.getUser().then(({ data: { user } }) => {
-      if (!user) return;
+      if (!user) {
+        setLoading(false);
+        return;
+      }
       Promise.all([
         fetchAllRows(supabase.from('emprestimos').select(LOAN_COLUMNS).eq('user_id', user.id).eq('contract_type', 'installment').order('data_emprestimo', { ascending: false })),
         fetchAllRows(supabase.from('installments').select(INSTALLMENT_COLUMNS).eq('user_id', user.id).order('due_date')),
       ]).then(([loansData, installmentsData]) => {
-        setLoans(loansData as Loan[]);
-        setInstallments(installmentsData as Installment[]);
+        const installmentLoans = loansData as Loan[];
+        const contractIds = new Set(installmentLoans.map(loan => String(loan.id)));
+        const relatedInstallments = (installmentsData as Installment[])
+          .filter(installment => contractIds.has(String(installment.contract_id)))
+          .map(installment => ({
+            ...installment,
+            installment_number: Number(installment.installment_number),
+            amount: asAmount(installment.amount),
+          }));
+        setLoans(installmentLoans);
+        setInstallments(relatedInstallments);
         setErrorMsg('');
         setLoading(false);
       }).catch((error: any) => {
@@ -64,42 +91,58 @@ export default function ParceladosPage() {
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
+    setPayingId(installmentId);
+    setErrorMsg('');
     try {
       const now = new Date().toISOString();
-      await supabase.from('installments').update({ paid_at: now, status: 'Paga' }).eq('id', installmentId).eq('user_id', user.id);
+      const { data: paidInstallment, error: paymentError } = await supabase
+        .from('installments')
+        .update({ paid_at: now, status: 'Paga' })
+        .eq('id', installmentId)
+        .eq('user_id', user.id)
+        .is('paid_at', null)
+        .select('contract_id')
+        .maybeSingle();
+      if (paymentError) throw new Error(paymentError.message);
+      if (!paidInstallment) throw new Error('Esta parcela já foi recebida ou não está mais disponível.');
+
+      const { count: pendingCount, error: countError } = await supabase
+        .from('installments')
+        .select('id', { count: 'exact', head: true })
+        .eq('contract_id', paidInstallment.contract_id)
+        .eq('user_id', user.id)
+        .is('paid_at', null);
+
+      if (!countError) {
+        const { error: contractStatusError } = await supabase
+          .from('emprestimos')
+          .update({ status: (pendingCount || 0) === 0 ? 'Pago' : 'Pendente' })
+          .eq('id', paidInstallment.contract_id)
+          .eq('user_id', user.id)
+          .eq('contract_type', 'installment');
+        if (contractStatusError) {
+          setErrorMsg('A parcela foi recebida, mas o status geral do contrato não pôde ser sincronizado.');
+        }
+      }
       setPayModal(null);
+      setDetails(null);
       setReloadKey(k => k + 1);
       if (typeof window !== 'undefined') window.dispatchEvent(new Event('cred-data-changed'));
     } catch (err: any) {
       setErrorMsg(err?.message || 'Erro ao registrar pagamento');
+    } finally {
+      setPayingId(null);
     }
   }, []);
 
-  const filtered = useMemo(() => {
-    let result = installments;
-    if (search) {
-      const s = search.toLowerCase();
-      result = result.filter(i => {
-        const loan = loans.find(l => l.id === i.contract_id);
-        if (!loan) return false;
-        const hay = `${loan.cliente} ${loan.telefone || ''} ${loan.descricao} ${loan.id} ${i.installment_number}`.toLowerCase();
-        return hay.includes(s);
-      });
-    }
-    if (filter === 'Pagas') result = result.filter(i => getInstallmentStatus(i.due_date, i.paid_at) === 'Paga');
-    else if (filter === 'Em dia') result = result.filter(i => getInstallmentStatus(i.due_date, i.paid_at) === 'A vencer');
-    else if (filter === 'Vence hoje') result = result.filter(i => getInstallmentStatus(i.due_date, i.paid_at) === 'Vence hoje');
-    else if (filter === 'Atrasados') result = result.filter(i => getInstallmentStatus(i.due_date, i.paid_at) === 'Atrasada');
-    else if (filter === 'Quitados') result = result.filter(i => getInstallmentStatus(i.due_date, i.paid_at) === 'Paga');
-    return result;
-  }, [installments, search, filter, loans]);
-
   const contractsWithInstallments = useMemo(() => {
     return loans.map(loan => {
-      const insts = installments.filter(i => i.contract_id === loan.id);
+      const insts = installments
+        .filter(i => sameEntityId(i.contract_id, loan.id))
+        .sort((a, b) => a.installment_number - b.installment_number);
       const paid = insts.filter(i => getInstallmentStatus(i.due_date, i.paid_at) === 'Paga');
-      const totalAmount = insts.reduce((s, i) => s + i.amount, 0);
-      const totalPaid = paid.reduce((s, i) => s + i.amount, 0);
+      const totalAmount = insts.reduce((sum, installment) => sum + asAmount(installment.amount), 0);
+      const totalPaid = paid.reduce((sum, installment) => sum + asAmount(installment.amount), 0);
       const progress = insts.length > 0 ? Math.round((paid.length / insts.length) * 100) : 0;
       const nextInst = insts.filter(i => getInstallmentStatus(i.due_date, i.paid_at) !== 'Paga').sort((a, b) => a.due_date.localeCompare(b.due_date))[0];
       return {
@@ -107,20 +150,42 @@ export default function ParceladosPage() {
         installments: insts,
         total_paid: totalPaid,
         total_amount: totalAmount,
+        remaining_amount: Math.max(totalAmount - totalPaid, 0),
         paid_count: paid.length,
         total_count: insts.length,
         next_due_date: nextInst?.due_date || null,
         next_amount: nextInst?.amount || 0,
         progress,
-      } as Loan & { installments: Installment[]; total_paid: number; total_amount: number; paid_count: number; total_count: number; next_due_date: string | null; next_amount: number; progress: number };
+      } as InstallmentContractView;
     });
   }, [loans, installments]);
+
+  const filteredContracts = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    return contractsWithInstallments.filter(contract => {
+      const statuses = contract.installments.map(installment => getInstallmentStatus(installment.due_date, installment.paid_at));
+      const isPaid = statuses.length > 0 && statuses.every(status => status === 'Paga');
+      const hasOverdue = statuses.includes('Atrasada');
+      const hasDueToday = statuses.includes('Vence hoje');
+      const hasOpen = statuses.some(status => status !== 'Paga');
+
+      const matchesSearch = !term || `${contract.cliente} ${contract.telefone || ''} ${contract.descricao} ${contract.id} ${contract.installments.map(i => i.installment_number).join(' ')}`
+        .toLowerCase()
+        .includes(term);
+      if (!matchesSearch) return false;
+      if (filter === 'Em dia') return hasOpen && !hasOverdue && !hasDueToday;
+      if (filter === 'Vence hoje') return hasDueToday;
+      if (filter === 'Atrasados') return hasOverdue;
+      if (filter === 'Quitados') return isPaid;
+      return true;
+    });
+  }, [contractsWithInstallments, filter, search]);
 
   const today = isoToday();
   const vencemHoje = installments.filter(i => getInstallmentStatus(i.due_date, i.paid_at) === 'Vence hoje');
   const atrasadas = installments.filter(i => getInstallmentStatus(i.due_date, i.paid_at) === 'Atrasada');
   const sortedContracts = useMemo(() => {
-    return [...contractsWithInstallments].sort((a, b) => {
+    return [...filteredContracts].sort((a, b) => {
       const aAtrasada = a.installments.some(i => getInstallmentStatus(i.due_date, i.paid_at) === 'Atrasada');
       const bAtrasada = b.installments.some(i => getInstallmentStatus(i.due_date, i.paid_at) === 'Atrasada');
       const aVenceHoje = a.installments.some(i => getInstallmentStatus(i.due_date, i.paid_at) === 'Vence hoje');
@@ -133,7 +198,7 @@ export default function ParceladosPage() {
       const bNext = b.next_due_date || '9999-99-99';
       return aNext.localeCompare(bNext);
     });
-  }, [contractsWithInstallments]) as typeof contractsWithInstallments;
+  }, [filteredContracts]);
 
   const pagaCount = installments.filter(i => getInstallmentStatus(i.due_date, i.paid_at) === 'Paga').length;
   const totalInstallments = installments.length;
@@ -167,7 +232,7 @@ export default function ParceladosPage() {
         </div>
       ) : (
         <>
-          <InstallmentStats installments={installments} />
+          <InstallmentStats installments={installments} loans={loans} />
 
           <section className="grid two-col" style={{ marginBottom: 20 }}>
             <InstallmentPieChart installments={installments} />
@@ -213,13 +278,14 @@ export default function ParceladosPage() {
               </div>
               <div style={{ display: 'grid', gap: 10 }}>
                 {vencemHoje.map(inst => {
-                  const loan = loans.find(l => l.id === inst.contract_id);
+                  const loan = loans.find(l => sameEntityId(l.id, inst.contract_id));
                   if (!loan) return null;
+                  const totalCount = contractsWithInstallments.find(contract => sameEntityId(contract.id, loan.id))?.total_count || 0;
                   return (
                     <div key={inst.id} className="contract-mini" style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
                       <div style={{ flex: 1, minWidth: 120 }}>
                         <span style={{ fontWeight: 700 }}>{loan.cliente}</span>
-                        <span className="muted" style={{ marginLeft: 12 }}>Parcela {inst.installment_number}/{inst.contract_id ? '' : ''}</span>
+                        <span className="muted" style={{ marginLeft: 12 }}>Parcela {inst.installment_number}/{totalCount}</span>
                       </div>
                       <span style={{ fontWeight: 800, color: 'var(--gold)' }}>{money(inst.amount)}</span>
                       <span className="badge" style={{ background: 'rgba(234,179,8,0.08)', color: 'var(--yellow)', borderColor: 'rgba(234,179,8,0.25)' }}>Vence hoje</span>
@@ -242,14 +308,15 @@ export default function ParceladosPage() {
               </div>
               <div style={{ display: 'grid', gap: 10 }}>
                 {atrasadas.map(inst => {
-                  const loan = loans.find(l => l.id === inst.contract_id);
+                  const loan = loans.find(l => sameEntityId(l.id, inst.contract_id));
                   if (!loan) return null;
-                  const diasAtraso = Math.floor((Date.now() - new Date(inst.due_date).getTime()) / 86400000);
+                  const totalCount = contractsWithInstallments.find(contract => sameEntityId(contract.id, loan.id))?.total_count || 0;
+                  const diasAtraso = daysOverdue(inst.due_date, today);
                   return (
                     <div key={inst.id} className="contract-mini" style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
                       <div style={{ flex: 1, minWidth: 120 }}>
                         <span style={{ fontWeight: 700 }}>{loan.cliente}</span>
-                        <span className="muted" style={{ marginLeft: 12 }}>Parcela {inst.installment_number}/{inst.contract_id ? '' : ''}</span>
+                        <span className="muted" style={{ marginLeft: 12 }}>Parcela {inst.installment_number}/{totalCount}</span>
                       </div>
                       <span style={{ fontWeight: 800, color: 'var(--red)' }}>{money(inst.amount)}</span>
                       <span className="badge" style={{ background: 'rgba(239,68,68,0.08)', color: 'var(--red)', borderColor: 'rgba(239,68,68,0.25)' }}>Atrasada há {diasAtraso}d</span>
@@ -288,7 +355,7 @@ export default function ParceladosPage() {
             </div>
           </div>
 
-          {filtered.length === 0 ? (
+          {filteredContracts.length === 0 ? (
             <div className="panel" style={{ textAlign: 'center', padding: 48 }}>
               <div className="empty-state">
                 <span className="empty-state-icon" style={{ fontSize: 48 }}>📋</span>
@@ -308,6 +375,7 @@ export default function ParceladosPage() {
                       <th>Parcelas</th>
                       <th>Pagas</th>
                       <th>Recebido</th>
+                      <th>Restante</th>
                       <th>Próx. Venc.</th>
                       <th>Próx. Valor</th>
                       <th>Progresso</th>
@@ -317,10 +385,10 @@ export default function ParceladosPage() {
                   </thead>
                   <tbody>
                     {sortedContracts.map(loan => {
-                      const status = loan.progress === 100 ? 'QUITADO' :
+                      const status = loan.total_count === 0 ? 'SEM PARCELAS' : loan.progress === 100 ? 'QUITADO' :
                         loan.installments.some(i => getInstallmentStatus(i.due_date, i.paid_at) === 'Atrasada') ? 'ATRASADO' : 'EM DIA';
                       const statusColor = status === 'QUITADO' ? 'badge-gray' :
-                        status === 'ATRASADO' ? 'badge-red' : 'badge-green';
+                        status === 'ATRASADO' || status === 'SEM PARCELAS' ? 'badge-red' : 'badge-green';
                       return (
                         <tr key={loan.id}>
                           <td>
@@ -339,6 +407,7 @@ export default function ParceladosPage() {
                             <span style={{ color: 'var(--green)', fontWeight: 700 }}>{loan.paid_count}</span>
                           </td>
                           <td className="text-right" style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>{money(loan.total_paid)}</td>
+                          <td className="text-right" style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}>{money(loan.remaining_amount)}</td>
                           <td style={{ textAlign: 'center' }}>{loan.next_due_date ? localDate(loan.next_due_date) : '—'}</td>
                           <td className="text-right" style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>{money(loan.next_amount)}</td>
                           <td style={{ minWidth: 120 }}>
@@ -353,9 +422,12 @@ export default function ParceladosPage() {
                             <span className={`badge ${statusColor}`}>{status}</span>
                           </td>
                           <td style={{ textAlign: 'center' }}>
-                            <button className="btn btn-dark btn-sm" onClick={() => setDetails({ loan, installments: loan.installments })}>
-                              <ChevronDown size={14} />
-                            </button>
+                            <div style={{ display: 'flex', justifyContent: 'center', gap: 6 }}>
+                              <button className="btn btn-dark btn-sm" onClick={() => setDetails({ loan, installments: loan.installments })} aria-label="Ver detalhes">
+                                <ChevronDown size={14} />
+                              </button>
+                              <Link href={`/contratos/${loan.id}`} className="btn btn-ghost btn-sm">Editar</Link>
+                            </div>
                           </td>
                         </tr>
                       );
@@ -367,10 +439,10 @@ export default function ParceladosPage() {
               {/* Mobile cards */}
               <div className="mobile-only">
                 {sortedContracts.map(loan => {
-                  const status = loan.progress === 100 ? 'QUITADO' :
+                  const status = loan.total_count === 0 ? 'SEM PARCELAS' : loan.progress === 100 ? 'QUITADO' :
                     loan.installments.some(i => getInstallmentStatus(i.due_date, i.paid_at) === 'Atrasada') ? 'ATRASADO' : 'EM DIA';
                   const statusColor = status === 'QUITADO' ? 'badge-gray' :
-                    status === 'ATRASADO' ? 'badge-red' : 'badge-green';
+                    status === 'ATRASADO' || status === 'SEM PARCELAS' ? 'badge-red' : 'badge-green';
                   return (
                     <div key={loan.id} className="mobile-card">
                       <div className="mobile-card-header">
@@ -394,6 +466,10 @@ export default function ParceladosPage() {
                         <span className="mobile-card-value" style={{ color: 'var(--green)' }}>{money(loan.total_paid)}</span>
                       </div>
                       <div className="mobile-card-row">
+                        <span className="mobile-card-label">Restante</span>
+                        <span className="mobile-card-value">{money(loan.remaining_amount)}</span>
+                      </div>
+                      <div className="mobile-card-row">
                         <span className="mobile-card-label">Próximo venc.</span>
                         <span className="mobile-card-value">{loan.next_due_date ? localDate(loan.next_due_date) : '—'}</span>
                       </div>
@@ -405,6 +481,7 @@ export default function ParceladosPage() {
                         <button className="btn btn-gold btn-sm" style={{ flex: 1 }} onClick={() => setDetails({ loan, installments: loan.installments })}>
                           <BarChart3 size={14} /> Ver detalhes
                         </button>
+                        <Link href={`/contratos/${loan.id}`} className="btn btn-dark btn-sm" style={{ flex: 1, textAlign: 'center' }}>Editar</Link>
                       </div>
                     </div>
                   );
@@ -439,6 +516,10 @@ export default function ParceladosPage() {
                     <div className="client-stat">
                       <div className="client-stat-label">Recebido</div>
                       <div className="client-stat-value" style={{ color: 'var(--green)' }}>{money(details.loan.total_paid)}</div>
+                    </div>
+                    <div className="client-stat">
+                      <div className="client-stat-label">Restante</div>
+                      <div className="client-stat-value">{money(details.loan.remaining_amount)}</div>
                     </div>
                   </div>
                 </div>
@@ -498,7 +579,7 @@ export default function ParceladosPage() {
                   <div style={{ display: 'grid', gap: 12, marginBottom: 20 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
                       <span style={{ color: 'var(--text-secondary)' }}>Parcela</span>
-                      <span style={{ fontWeight: 700 }}>{payModal.installment.installment_number}/{payModal.loan.prazo_meses}</span>
+                      <span style={{ fontWeight: 700 }}>{payModal.installment.installment_number}/{contractsWithInstallments.find(contract => sameEntityId(contract.id, payModal.loan.id))?.total_count || '—'}</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
                       <span style={{ color: 'var(--text-secondary)' }}>Valor</span>
@@ -510,8 +591,8 @@ export default function ParceladosPage() {
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: 10 }}>
-                    <button className="btn btn-gold" style={{ flex: 1 }} onClick={() => handlePaid(payModal.installment.id)}>
-                      <CheckCircle size={16} /> Confirmar Recebimento
+                    <button className="btn btn-gold" style={{ flex: 1 }} onClick={() => handlePaid(payModal.installment.id)} disabled={payingId === payModal.installment.id}>
+                      <CheckCircle size={16} /> {payingId === payModal.installment.id ? 'Registrando...' : 'Confirmar Recebimento'}
                     </button>
                     <button className="btn btn-dark" onClick={() => setPayModal(null)}>Cancelar</button>
                   </div>

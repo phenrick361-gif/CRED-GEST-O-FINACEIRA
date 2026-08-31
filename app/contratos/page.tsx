@@ -26,7 +26,7 @@ export default function ContractsPage() {
         .then(({ data, error }) => {
           if (error) { setErrorMsg(error.message); return; }
           setErrorMsg('');
-          setLoans((data || []) as Loan[]);
+          setLoans(((data || []) as Loan[]).filter(loan => loan.contract_type !== 'installment'));
         });
     });
   }, []);

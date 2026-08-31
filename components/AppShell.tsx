@@ -1,12 +1,13 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { useState, useEffect } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { LayoutDashboard, Users, Briefcase, PlusCircle, BarChart3, FileText, Calculator, Settings, LogOut, Menu, X, ShieldCheck } from 'lucide-react';
 import type { Profile } from '@/types';
+import { isoToday } from '@/lib/finance';
 
 export default function AppShell({ children }: { children: ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -17,8 +18,21 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const supabase = createClient();
 
+  const refreshOverdueCount = useCallback(async () => {
+    const client = createClient();
+    const { data: { user } } = await client.auth.getUser();
+    if (!user) return;
+    const { count, error } = await client
+      .from('installments')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', user.id)
+      .is('paid_at', null)
+      .lt('due_date', isoToday());
+    if (!error) setOverdueCount(count || 0);
+  }, []);
+
   useEffect(() => {
-    const s = supabase;
+    const s = createClient();
     s.auth.getUser().then(({ data: { user } }) => {
       if (!user) return;
       s.from('profiles').select('*').eq('id', user.id).maybeSingle().then(({ data }) => {
@@ -30,18 +44,16 @@ export default function AppShell({ children }: { children: ReactNode }) {
         }
       });
     });
-    s.auth.getUser().then(async ({ data: { user } }) => {
-      if (!user) return;
-      try {
-        const { count } = await s.from('installments')
-          .select('id', { count: 'exact', head: true })
-          .eq('user_id', user.id)
-          .eq('paid_at', null)
-          .lt('due_date', new Date().toISOString().split('T')[0]);
-        setOverdueCount(count || 0);
-      } catch {}
-    });
-  }, []);
+    refreshOverdueCount();
+    window.addEventListener('cred-data-changed', refreshOverdueCount);
+    window.addEventListener('focus', refreshOverdueCount);
+    document.addEventListener('visibilitychange', refreshOverdueCount);
+    return () => {
+      window.removeEventListener('cred-data-changed', refreshOverdueCount);
+      window.removeEventListener('focus', refreshOverdueCount);
+      document.removeEventListener('visibilitychange', refreshOverdueCount);
+    };
+  }, [refreshOverdueCount]);
 
   const links = [
     { icon: LayoutDashboard, label: 'Painel', href: '/dashboard' },

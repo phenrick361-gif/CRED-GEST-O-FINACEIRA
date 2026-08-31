@@ -60,8 +60,8 @@ export default function SettingsPanel() {
     finally { setLoading(false); }
   }
 
-  async function fixContract(loanId: string) {
-    const newPrincipal = fixes[loanId];
+  async function fixContract(loanId: string | number) {
+    const newPrincipal = fixes[String(loanId)];
     if (!newPrincipal || newPrincipal <= 0) return;
     setError(null); setMessage(null);
     try {
@@ -82,7 +82,7 @@ export default function SettingsPanel() {
       if (authError || !user) throw new Error('Usuário não autenticado.');
       let fixed = 0;
       for (const loan of contracts) {
-        const newPrincipal = fixes[loan.id];
+        const newPrincipal = fixes[String(loan.id)];
         if (!newPrincipal || newPrincipal <= 0) continue;
         const { error: updateErr } = await supabase.from('emprestimos').update({ valor_emprestado: newPrincipal }).eq('id', loan.id).eq('user_id', user.id);
         if (updateErr) throw new Error(`Erro ao corrigir ${loan.cliente}: ${updateErr.message}`);
@@ -166,14 +166,14 @@ export default function SettingsPanel() {
                         <td>
                           <input className="input" type="number" min="0" step="0.01"
                             placeholder="Novo valor"
-                            value={fixes[loan.id] ?? ''}
-                            onChange={e => setFixes(prev => ({ ...prev, [loan.id]: Number(e.target.value) }))}
+                            value={fixes[String(loan.id)] ?? ''}
+                            onChange={e => setFixes(prev => ({ ...prev, [String(loan.id)]: Number(e.target.value) }))}
                             style={{ minHeight: 36, fontSize: 13, width: 140 }}
                           />
                         </td>
                         <td>
                           <button className="btn btn-gold btn-sm"
-                            disabled={!fixes[loan.id] || fixes[loan.id] <= 0 || loading}
+                            disabled={!fixes[String(loan.id)] || fixes[String(loan.id)] <= 0 || loading}
                             onClick={() => fixContract(loan.id)}
                           >Corrigir</button>
                         </td>

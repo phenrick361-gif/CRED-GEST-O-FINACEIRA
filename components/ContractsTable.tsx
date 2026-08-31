@@ -15,7 +15,7 @@ export default function ContractsTable({ loans, onChanged }: { loans: Loan[]; on
   const [filter, setFilter] = useState('Todos');
   const [busy, setBusy] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
-  const [cardDetails, setCardDetails] = useState<Set<string>>(new Set());
+  const [cardDetails, setCardDetails] = useState<Set<string | number>>(new Set());
   const [errorMsg, setErrorMsg] = useState('');
   const itemsPerPage = 10;
 
@@ -26,7 +26,7 @@ export default function ContractsTable({ loans, onChanged }: { loans: Loan[]; on
     window.setTimeout(() => setErrorMsg(''), 6000);
   }
 
-  function toggleCardDetails(id: string) {
+  function toggleCardDetails(id: string | number) {
     setCardDetails(prev => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);

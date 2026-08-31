@@ -2,6 +2,7 @@
 
 import { getInstallmentStatus } from '@/lib/finance';
 import type { Installment } from '@/types/installment';
+import { asAmount } from '@/lib/installments';
 
 function fmt(n: number) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(n);
@@ -23,10 +24,10 @@ export function InstallmentPieChart({ installments }: InstallmentPieChartProps) 
   const circ = 2 * Math.PI * r;
 
   const segments = [
-    { label: 'PAGAS', value: paga.length, amount: paga.reduce((s, i) => s + i.amount, 0), color: '#22C55E' },
-    { label: 'A VENCER', value: avencer.length, amount: avencer.reduce((s, i) => s + i.amount, 0), color: '#3B82F6' },
-    { label: 'VENCEM HOJE', value: venceHoje.length, amount: venceHoje.reduce((s, i) => s + i.amount, 0), color: '#EAB308' },
-    { label: 'ATRASADAS', value: atrasada.length, amount: atrasada.reduce((s, i) => s + i.amount, 0), color: '#EF4444' },
+    { label: 'PAGAS', value: paga.length, amount: paga.reduce((sum, installment) => sum + asAmount(installment.amount), 0), color: '#22C55E' },
+    { label: 'A VENCER', value: avencer.length, amount: avencer.reduce((sum, installment) => sum + asAmount(installment.amount), 0), color: '#3B82F6' },
+    { label: 'VENCEM HOJE', value: venceHoje.length, amount: venceHoje.reduce((sum, installment) => sum + asAmount(installment.amount), 0), color: '#EAB308' },
+    { label: 'ATRASADAS', value: atrasada.length, amount: atrasada.reduce((sum, installment) => sum + asAmount(installment.amount), 0), color: '#EF4444' },
   ].filter(s => s.value > 0);
 
   if (!hasData) {
@@ -50,7 +51,7 @@ export function InstallmentPieChart({ installments }: InstallmentPieChartProps) 
     return arc;
   });
 
-  const totalAmount = installments.reduce((s, i) => s + i.amount, 0);
+  const totalAmount = installments.reduce((sum, installment) => sum + asAmount(installment.amount), 0);
 
   return (
     <div className="chart-card">

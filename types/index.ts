@@ -2,7 +2,7 @@ export type LoanStatus = 'Pendente' | 'Pago' | 'Cancelado';
 export type ContractType = 'normal' | 'installment';
 
 export type Loan = {
-  id: string;
+  id: string | number;
   user_id: string;
   cliente: string;
   telefone: string | null;
@@ -34,7 +34,7 @@ export type Profile = {
 export type Pagamento = {
   id: string | number;
   user_id: string;
-  emprestimo_id: string | null;
+  emprestimo_id: string | number | null;
   tipo: 'Juros' | 'Total' | 'Parcial' | string;
   valor: number;
   pago_em: string;

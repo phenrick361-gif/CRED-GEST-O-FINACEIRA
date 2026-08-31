@@ -5,27 +5,45 @@ import { useParams, notFound } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { LOAN_COLUMNS } from '@/lib/supabase/columns';
 import AppShell from '@/components/AppShell';
-import LoanForm from '@/components/LoanForm';
-import type { Loan } from '@/types';
+import LoanForm, { type LoanFormInitial } from '@/components/LoanForm';
 
 export default function EditLoanPage() {
   const { id } = useParams<{ id: string }>();
-  const [loan, setLoan] = useState<Loan | null | 'loading'>('loading');
+  const [loan, setLoan] = useState<LoanFormInitial | null | 'loading'>('loading');
 
   useEffect(() => {
     if (!id) return;
     const supabase = createClient();
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (!user) { setLoan(null); return; }
-      supabase
-        .from('emprestimos')
-        .select(LOAN_COLUMNS)
-        .eq('id', id)
-        .eq('user_id', user.id)
-        .maybeSingle()
-        .then(({ data }) => {
-          setLoan(data as Loan || null);
-        });
+      Promise.all([
+        supabase
+          .from('emprestimos')
+          .select(LOAN_COLUMNS)
+          .eq('id', id)
+          .eq('user_id', user.id)
+          .maybeSingle(),
+        supabase
+          .from('installments')
+          .select('installment_number,amount,due_date')
+          .eq('contract_id', id)
+          .eq('user_id', user.id)
+          .order('installment_number'),
+      ]).then(([loanResult, installmentResult]) => {
+        if (loanResult.error || !loanResult.data) {
+          setLoan(null);
+          return;
+        }
+
+        const plan = installmentResult.data || [];
+        setLoan({
+          ...loanResult.data,
+          numero_parcelas: plan.length || undefined,
+          valor_parcela: plan[0]?.amount ?? undefined,
+          primeiro_vencimento: plan[0]?.due_date ?? undefined,
+          total_parcelas: plan.reduce((sum, installment) => sum + Number(installment.amount || 0), 0),
+        } as LoanFormInitial);
+      });
     });
   }, [id]);
 
