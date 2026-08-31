@@ -86,22 +86,22 @@ export default function ParceladosPage() {
         return hay.includes(s);
       });
     }
-    if (filter === 'Pagas') result = result.filter(i => i.status === 'Paga');
-    else if (filter === 'Em dia') result = result.filter(i => i.status === 'A vencer');
-    else if (filter === 'Vence hoje') result = result.filter(i => i.status === 'Vence hoje');
-    else if (filter === 'Atrasados') result = result.filter(i => i.status === 'Atrasada');
-    else if (filter === 'Quitados') result = result.filter(i => i.status === 'Paga');
+    if (filter === 'Pagas') result = result.filter(i => getInstallmentStatus(i.due_date, i.paid_at) === 'Paga');
+    else if (filter === 'Em dia') result = result.filter(i => getInstallmentStatus(i.due_date, i.paid_at) === 'A vencer');
+    else if (filter === 'Vence hoje') result = result.filter(i => getInstallmentStatus(i.due_date, i.paid_at) === 'Vence hoje');
+    else if (filter === 'Atrasados') result = result.filter(i => getInstallmentStatus(i.due_date, i.paid_at) === 'Atrasada');
+    else if (filter === 'Quitados') result = result.filter(i => getInstallmentStatus(i.due_date, i.paid_at) === 'Paga');
     return result;
   }, [installments, search, filter, loans]);
 
   const contractsWithInstallments = useMemo(() => {
     return loans.map(loan => {
       const insts = installments.filter(i => i.contract_id === loan.id);
-      const paid = insts.filter(i => i.status === 'Paga');
+      const paid = insts.filter(i => getInstallmentStatus(i.due_date, i.paid_at) === 'Paga');
       const totalAmount = insts.reduce((s, i) => s + i.amount, 0);
       const totalPaid = paid.reduce((s, i) => s + i.amount, 0);
       const progress = insts.length > 0 ? Math.round((paid.length / insts.length) * 100) : 0;
-      const nextInst = insts.filter(i => i.status !== 'Paga').sort((a, b) => a.due_date.localeCompare(b.due_date))[0];
+      const nextInst = insts.filter(i => getInstallmentStatus(i.due_date, i.paid_at) !== 'Paga').sort((a, b) => a.due_date.localeCompare(b.due_date))[0];
       return {
         ...loan,
         installments: insts,
@@ -117,14 +117,14 @@ export default function ParceladosPage() {
   }, [loans, installments]);
 
   const today = isoToday();
-  const vencemHoje = installments.filter(i => i.status === 'Vence hoje');
-  const atrasadas = installments.filter(i => i.status === 'Atrasada');
+  const vencemHoje = installments.filter(i => getInstallmentStatus(i.due_date, i.paid_at) === 'Vence hoje');
+  const atrasadas = installments.filter(i => getInstallmentStatus(i.due_date, i.paid_at) === 'Atrasada');
   const sortedContracts = useMemo(() => {
     return [...contractsWithInstallments].sort((a, b) => {
-      const aAtrasada = a.installments.some(i => i.status === 'Atrasada');
-      const bAtrasada = b.installments.some(i => i.status === 'Atrasada');
-      const aVenceHoje = a.installments.some(i => i.status === 'Vence hoje');
-      const bVenceHoje = b.installments.some(i => i.status === 'Vence hoje');
+      const aAtrasada = a.installments.some(i => getInstallmentStatus(i.due_date, i.paid_at) === 'Atrasada');
+      const bAtrasada = b.installments.some(i => getInstallmentStatus(i.due_date, i.paid_at) === 'Atrasada');
+      const aVenceHoje = a.installments.some(i => getInstallmentStatus(i.due_date, i.paid_at) === 'Vence hoje');
+      const bVenceHoje = b.installments.some(i => getInstallmentStatus(i.due_date, i.paid_at) === 'Vence hoje');
       if (aAtrasada && !bAtrasada) return -1;
       if (!aAtrasada && bAtrasada) return 1;
       if (aVenceHoje && !bVenceHoje) return -1;
@@ -135,7 +135,7 @@ export default function ParceladosPage() {
     });
   }, [contractsWithInstallments]) as typeof contractsWithInstallments;
 
-  const pagaCount = installments.filter(i => i.status === 'Paga').length;
+  const pagaCount = installments.filter(i => getInstallmentStatus(i.due_date, i.paid_at) === 'Paga').length;
   const totalInstallments = installments.length;
 
   const filters = ['Todos', 'Em dia', 'Vence hoje', 'Atrasados', 'Quitados'];
@@ -318,7 +318,7 @@ export default function ParceladosPage() {
                   <tbody>
                     {sortedContracts.map(loan => {
                       const status = loan.progress === 100 ? 'QUITADO' :
-                        loan.installments.some(i => i.status === 'Atrasada') ? 'ATRASADO' : 'EM DIA';
+                        loan.installments.some(i => getInstallmentStatus(i.due_date, i.paid_at) === 'Atrasada') ? 'ATRASADO' : 'EM DIA';
                       const statusColor = status === 'QUITADO' ? 'badge-gray' :
                         status === 'ATRASADO' ? 'badge-red' : 'badge-green';
                       return (
@@ -368,7 +368,7 @@ export default function ParceladosPage() {
               <div className="mobile-only">
                 {sortedContracts.map(loan => {
                   const status = loan.progress === 100 ? 'QUITADO' :
-                    loan.installments.some(i => i.status === 'Atrasada') ? 'ATRASADO' : 'EM DIA';
+                    loan.installments.some(i => getInstallmentStatus(i.due_date, i.paid_at) === 'Atrasada') ? 'ATRASADO' : 'EM DIA';
                   const statusColor = status === 'QUITADO' ? 'badge-gray' :
                     status === 'ATRASADO' ? 'badge-red' : 'badge-green';
                   return (
@@ -462,12 +462,12 @@ export default function ParceladosPage() {
                           <td style={{ fontWeight: 700 }}>{money(inst.amount)}</td>
                           <td style={{ textAlign: 'center' }}>{localDate(inst.due_date)}</td>
                           <td style={{ textAlign: 'center' }}>
-                            <span className={`badge ${inst.status === 'Paga' ? 'badge-green' : inst.status === 'Atrasada' ? 'badge-red' : inst.status === 'Vence hoje' ? 'badge-gold' : 'badge-gray'}`}>
-                              {inst.status}
+                             <span className={`badge ${getInstallmentStatus(inst.due_date, inst.paid_at) === 'Paga' ? 'badge-green' : getInstallmentStatus(inst.due_date, inst.paid_at) === 'Atrasada' ? 'badge-red' : getInstallmentStatus(inst.due_date, inst.paid_at) === 'Vence hoje' ? 'badge-gold' : 'badge-gray'}`}>
+                               {getInstallmentStatus(inst.due_date, inst.paid_at)}
                             </span>
                           </td>
                           <td style={{ textAlign: 'center' }}>
-                            {inst.status !== 'Paga' && (
+                            {getInstallmentStatus(inst.due_date, inst.paid_at) !== 'Paga' && (
                               <button className="btn btn-gold btn-sm" onClick={() => setPayModal({ installment: inst, loan: details.loan })}>
                                 <Receipt size={14} /> Receber
                               </button>

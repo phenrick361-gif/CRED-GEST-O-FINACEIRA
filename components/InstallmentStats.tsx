@@ -1,5 +1,6 @@
 'use client';
 
+import { getInstallmentStatus } from '@/lib/finance';
 import type { Installment } from '@/types/installment';
 import { money } from '@/lib/finance';
 import { DollarSign, Clock, CheckCircle, AlertTriangle, Calendar, XCircle } from 'lucide-react';
@@ -9,13 +10,12 @@ interface InstallmentStatsProps {
 }
 
 export function InstallmentStats({ installments }: InstallmentStatsProps) {
-  const ativas = installments.filter(i => i.status !== 'Paga');
-  const pagas = installments.filter(i => i.status === 'Paga');
-  const abertas = installments.filter(i => i.status !== 'Paga');
-  const vencemHoje = installments.filter(i => i.status === 'Vence hoje');
-  const atrasadas = installments.filter(i => i.status === 'Atrasada');
-  const totalPago = pagas.reduce((s, i) => s + i.amount, 0);
-  const totalAberto = ativas.reduce((s, i) => s + i.amount, 0);
+  const paga = installments.filter(i => getInstallmentStatus(i.due_date, i.paid_at) === 'Paga');
+  const abertas = installments.filter(i => getInstallmentStatus(i.due_date, i.paid_at) !== 'Paga');
+  const vencemHoje = installments.filter(i => getInstallmentStatus(i.due_date, i.paid_at) === 'Vence hoje');
+  const atrasadas = installments.filter(i => getInstallmentStatus(i.due_date, i.paid_at) === 'Atrasada');
+  const totalPago = paga.reduce((s, i) => s + i.amount, 0);
+  const totalAberto = abertas.reduce((s, i) => s + i.amount, 0);
   const capitalParcelado = installments.reduce((s, i) => s + i.amount, 0);
 
   const stats = [

@@ -1,5 +1,6 @@
 'use client';
 
+import { getInstallmentStatus } from '@/lib/finance';
 import type { Installment } from '@/types/installment';
 
 function fmt(n: number) {
@@ -11,10 +12,10 @@ interface InstallmentPieChartProps {
 }
 
 export function InstallmentPieChart({ installments }: InstallmentPieChartProps) {
-  const paga = installments.filter(i => i.status === 'Paga');
-  const avencer = installments.filter(i => i.status === 'A vencer');
-  const venceHoje = installments.filter(i => i.status === 'Vence hoje');
-  const atrasada = installments.filter(i => i.status === 'Atrasada');
+  const paga = installments.filter(i => getInstallmentStatus(i.due_date, i.paid_at) === 'Paga');
+  const avencer = installments.filter(i => getInstallmentStatus(i.due_date, i.paid_at) === 'A vencer');
+  const venceHoje = installments.filter(i => getInstallmentStatus(i.due_date, i.paid_at) === 'Vence hoje');
+  const atrasada = installments.filter(i => getInstallmentStatus(i.due_date, i.paid_at) === 'Atrasada');
 
   const total = installments.length;
   const hasData = total > 0;
