@@ -49,8 +49,10 @@ export default function BalancoGeral() {
   const today = isoToday();
   const pendentes = loans.filter(l => l.status === 'Pendente');
   const pagos = loans.filter(l => l.status === 'Pago');
-  const semJuros = pendentes.filter(l => !hasInterest(l));
-  const comJuros = pendentes.filter(l => hasInterest(l));
+  const normais = loans.filter(l => l.contract_type !== 'installment');
+  const normaisPendentes = normais.filter(l => l.status === 'Pendente');
+  const semJuros = normaisPendentes.filter(l => !hasInterest(l));
+  const comJuros = normaisPendentes.filter(l => hasInterest(l));
 
   let capitalInvestido = 0;
   let jurosPrevistos = 0;
@@ -58,7 +60,7 @@ export default function BalancoGeral() {
   let contratosAtrasados = 0;
   let maxTotal = 0;
 
-  pendentes.forEach(loan => {
+  normaisPendentes.forEach(loan => {
     const c = Number(loan.valor_emprestado);
     const j = interest(loan);
     const t = total(loan);

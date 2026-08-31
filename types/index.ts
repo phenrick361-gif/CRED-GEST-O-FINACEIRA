@@ -1,4 +1,5 @@
 export type LoanStatus = 'Pendente' | 'Pago' | 'Cancelado';
+export type ContractType = 'normal' | 'installment';
 
 export type Loan = {
   id: string;
@@ -16,6 +17,7 @@ export type Loan = {
   data_emprestimo: string;
   data_vencimento: string;
   status: LoanStatus;
+  contract_type: ContractType;
   created_at: string;
   updated_at: string;
 };
@@ -38,3 +40,5 @@ export type Pagamento = {
   pago_em: string;
   observacao: string | null;
 };
+
+export type { Installment, InstallmentStatus, InstallmentContract, ContractFilters } from './installment';

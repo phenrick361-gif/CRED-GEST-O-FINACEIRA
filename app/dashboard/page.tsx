@@ -57,21 +57,23 @@ export default function Dashboard() {
 
   const today = isoToday();
   const pendentes = loans.filter(l => l.status === 'Pendente');
-  const pagos = loans.filter(l => l.status === 'Pago');
+  const pagados = loans.filter(l => l.status === 'Pago');
+  const normais = loans.filter(l => l.contract_type !== 'installment');
+  const normaisPendentes = normais.filter(l => l.status === 'Pendente');
 
   let capitalInvestido = 0;
   let totalCarteira = 0;
   let contratosAtrasados = 0;
   const dueTodayLoans: Loan[] = [];
 
-  pendentes.forEach(loan => {
+  normaisPendentes.forEach(loan => {
     capitalInvestido += Number(loan.valor_emprestado);
     totalCarteira += total(loan);
     if (loan.data_vencimento < today) contratosAtrasados++;
     if (loan.data_vencimento === today) dueTodayLoans.push(loan);
   });
 
-  const contratosPagos = pagos.length;
+  const contratosPagos = pagados.length;
   const contratosAtivos = pendentes.length;
   const venceHojeCount = dueTodayLoans.length;
   const contratosAtrasadosCount = contratosAtrasados;

@@ -1,4 +1,4 @@
-import type { Loan } from '@/types';
+import type { Loan, InstallmentStatus } from '@/types';
 
 export const money = (value: number) =>
   new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(value || 0));
@@ -97,4 +97,39 @@ export function situation(loan: Loan) {
   if (loan.data_vencimento < today) return 'Atrasado';
   if (loan.data_vencimento === today) return 'Vence hoje';
   return 'Em dia';
+}
+
+export function installmentStatus(installment: { paid_at: string | null; due_date: string }): InstallmentStatus {
+  if (installment.paid_at) return 'Paga';
+  const today = isoToday();
+  const due = installment.due_date;
+  if (due < today) return 'Atrasada';
+  if (due === today) return 'Vence hoje';
+  return 'A vencer';
+}
+
+export function getInstallmentStatus(dueDate: string, paidAt: string | null): InstallmentStatus {
+  if (paidAt) return 'Paga';
+  const today = isoToday();
+  if (dueDate < today) return 'Atrasada';
+  if (dueDate === today) return 'Vence hoje';
+  return 'A vencer';
+}
+
+export function generateInstallmentDates(
+  firstDueDate: string,
+  count: number,
+  monthly: boolean = true
+): string[] {
+  const dates: string[] = [];
+  const base = new Date(`${firstDueDate}T12:00:00`);
+  for (let i = 0; i < count; i++) {
+    const d = new Date(base);
+    d.setMonth(d.getMonth() + i);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    dates.push(`${y}-${m}-${day}`);
+  }
+  return dates;
 }

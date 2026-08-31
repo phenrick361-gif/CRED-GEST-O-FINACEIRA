@@ -13,6 +13,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [userName, setUserName] = useState('Usuário');
   const [allowed, setAllowed] = useState(true);
+  const [overdueCount, setOverdueCount] = useState(0);
   const pathname = usePathname();
   const supabase = createClient();
 
@@ -29,10 +30,22 @@ export default function AppShell({ children }: { children: ReactNode }) {
         }
       });
     });
+    s.auth.getUser().then(async ({ data: { user } }) => {
+      if (!user) return;
+      try {
+        const { count } = await s.from('installments')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', user.id)
+          .eq('paid_at', null)
+          .lt('due_date', new Date().toISOString().split('T')[0]);
+        setOverdueCount(count || 0);
+      } catch {}
+    });
   }, []);
 
   const links = [
     { icon: LayoutDashboard, label: 'Painel', href: '/dashboard' },
+    { icon: LayoutDashboard, label: 'Parcelados', href: '/parcelados' },
     { icon: Users, label: 'Clientes', href: '/clientes' },
     { icon: Briefcase, label: 'Carteira', href: '/contratos' },
     { icon: PlusCircle, label: 'Novo empréstimo', href: '/novo-emprestimo' },
@@ -88,10 +101,12 @@ export default function AppShell({ children }: { children: ReactNode }) {
           {links.map(l => {
             const active = isActive(l.href);
             const Icon = l.icon;
+            const showBadge = l.label === 'Parcelados' && overdueCount > 0;
             return (
               <Link key={l.href} href={l.href} className={active ? 'active' : ''} aria-current={active ? 'page' : undefined} onClick={closeSidebar}>
                 <Icon className="nav-icon" size={18} />
                 {l.label}
+                {showBadge && <span style={{ background: 'var(--red)', color: '#fff', fontSize: 10, fontWeight: 800, borderRadius: 999, padding: '1px 7px', minWidth: 20, textAlign: 'center', marginLeft: 4 }}>{overdueCount}</span>}
               </Link>
             );
           })}

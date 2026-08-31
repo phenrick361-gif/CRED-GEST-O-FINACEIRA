@@ -3,8 +3,9 @@
 import { FormEvent, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
-import type { Loan } from '@/types';
-import { User, DollarSign, Calendar, FileText } from 'lucide-react';
+import type { Loan, ContractType } from '@/types';
+import { User, DollarSign, Calendar, FileText, Layers } from 'lucide-react';
+import { money } from '@/lib/finance';
 
 type Initial = Partial<Loan>;
 
@@ -53,13 +54,24 @@ function validateLoanForm(formData: any): { valid: boolean; errors: string[] } {
   }
   const valorEmpestado = Number(formData.valor_emprestado);
   if (valorEmpestado > 1000000) { errors.push('Valor máximo do empréstimo é R$ 1.000.000'); }
+  if (formData.contract_type === 'installment') {
+    if (!formData.numero_parcelas || formData.numero_parcelas < 1) { errors.push('Número de parcelas é obrigatório'); }
+    if (!formData.valor_parcela || formData.valor_parcela <= 0) { errors.push('Valor da parcela deve ser maior que zero'); }
+    if (!formData.primeiro_vencimento) { errors.push('Primeiro vencimento é obrigatório'); }
+  }
   return { valid: errors.length === 0, errors };
 }
 
-export default function LoanForm({ initial, id }: { initial?: Initial; id?: string }) {
+export default function LoanForm({ initial, id }: { initial?: Partial<Loan> & { numero_parcelas?: string; valor_parcela?: string; primeiro_vencimento?: string }; id?: string }) {
   const router = useRouter();
   const today = formatLocalDate(new Date());
-  const [form, setForm] = useState({
+  const [form, setForm] = useState<{
+    cliente: string; telefone: string; observacao: string; descricao: string;
+    valor_emprestado: string; porcentagem_juros: string; juros_aplicado: string;
+    modalidade: string; periodicidade: string; prazo_meses: string;
+    data_emprestimo: string; data_vencimento: string; status: string;
+    contract_type: ContractType; numero_parcelas: string; valor_parcela: string; primeiro_vencimento: string;
+  }>({
     cliente: initial?.cliente ? sanitizeInput(initial.cliente) : '',
     telefone: initial?.telefone ? sanitizeInput(initial.telefone) : '',
     observacao: initial?.observacao ? sanitizeInput(initial.observacao) : '',
@@ -72,7 +84,11 @@ export default function LoanForm({ initial, id }: { initial?: Initial; id?: stri
     prazo_meses: String(initial?.prazo_meses ?? 1),
     data_emprestimo: initial?.data_emprestimo || today,
     data_vencimento: initial?.data_vencimento || addMonths(today, 1),
-    status: initial?.status || 'Pendente'
+    status: initial?.status || 'Pendente',
+    contract_type: (initial?.contract_type as ContractType) || 'normal',
+    numero_parcelas: String(initial?.numero_parcelas ?? ''),
+    valor_parcela: String(initial?.valor_parcela ?? ''),
+    primeiro_vencimento: initial?.primeiro_vencimento || '',
   });
   const [error, setError] = useState('');
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
@@ -117,17 +133,34 @@ export default function LoanForm({ initial, id }: { initial?: Initial; id?: stri
     if (!user) { router.replace('/login'); return; }
 
     try {
-      const payload = {
+      const isInstallment = form.contract_type === 'installment';
+      const valorEmprestado = Number(form.valor_emprestado);
+      const numeroParcelas = isInstallment ? parseInt(form.numero_parcelas || '0', 10) : 0;
+      const valorParcela = isInstallment ? Number(form.valor_parcela) : 0;
+      const totalReceber = isInstallment ? valorParcela * numeroParcelas : 0;
+
+      const payload: any = {
         ...form,
         user_id: user.id,
         cliente: form.cliente.trim(),
         telefone: form.telefone.trim(),
         descricao: form.descricao.trim(),
         observacao: (form.observacao || '').trim(),
-        valor_emprestado: Number(form.valor_emprestado),
+        valor_emprestado: valorEmprestado,
         porcentagem_juros: Number(form.porcentagem_juros),
-        prazo_meses: Number(form.prazo_meses)
+        prazo_meses: Number(form.prazo_meses),
+        contract_type: form.contract_type,
+        numero_parcelas: isInstallment ? numeroParcelas : null,
+        valor_parcela: isInstallment ? valorParcela : null,
+        primeiro_vencimento: isInstallment ? form.primeiro_vencimento : null,
+        status: isInstallment ? 'Pendente' : form.status,
       };
+
+      if (!isInstallment) {
+        delete payload.numero_parcelas;
+        delete payload.valor_parcela;
+        delete payload.primeiro_vencimento;
+      }
 
       const validation = validateLoanForm(payload);
       if (!validation.valid) {
@@ -136,7 +169,7 @@ export default function LoanForm({ initial, id }: { initial?: Initial; id?: stri
         return;
       }
 
-      let result;
+      let result: any;
       if (id) {
         result = await supabase.from('emprestimos').update(payload).eq('id', id).eq('user_id', user.id);
       } else {
@@ -144,6 +177,34 @@ export default function LoanForm({ initial, id }: { initial?: Initial; id?: stri
       }
 
       if (result.error) { throw new Error(result.error.message); }
+
+      if (!id && isInstallment && result.data && result.data[0]) {
+        const contractId = result.data[0].id;
+        const installmentDates: string[] = [];
+        const baseDate = new Date(`${form.primeiro_vencimento}T12:00:00`);
+        for (let i = 0; i < numeroParcelas; i++) {
+          const d = new Date(baseDate);
+          d.setMonth(d.getMonth() + i);
+          const y = d.getFullYear();
+          const m = String(d.getMonth() + 1).padStart(2, '0');
+          const day = String(d.getDate()).padStart(2, '0');
+          installmentDates.push(`${y}-${m}-${day}`);
+        }
+
+        const installmentRows = installmentDates.map((dueDate, idx) => ({
+          contract_id: contractId,
+          user_id: user.id,
+          installment_number: idx + 1,
+          amount: valorParcela,
+          due_date: dueDate,
+          paid_at: null,
+          status: 'A vencer' as const,
+        }));
+
+        const { error: instError } = await supabase.from('installments').insert(installmentRows);
+        if (instError) throw new Error(instError.message);
+      }
+
       if (typeof window !== 'undefined') window.dispatchEvent(new Event('cred-data-changed'));
       router.push('/contratos');
       router.refresh();
@@ -158,6 +219,10 @@ export default function LoanForm({ initial, id }: { initial?: Initial; id?: stri
   const taxa = Number(form.porcentagem_juros) || 0;
   const jurosCalculado = valor * (taxa / 100);
   const totalCalculado = valor + jurosCalculado;
+  const isInstallment = form.contract_type === 'installment';
+  const numParcelas = parseInt(form.numero_parcelas || '0', 10);
+  const valParcela = Number(form.valor_parcela || '0');
+  const totalReceber = isInstallment ? valParcela * numParcelas : 0;
 
   return (
     <div className="loan-form-layout">
@@ -234,6 +299,84 @@ export default function LoanForm({ initial, id }: { initial?: Initial; id?: stri
 
         <div style={{ marginBottom: 20 }}>
           <h4 style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 15, fontWeight: 700, color: 'var(--gold-light)', marginBottom: 16 }}>
+            <Layers size={18} /> Tipo de Contrato
+          </h4>
+          <div className="form-grid">
+            <div className="field">
+              <label>Tipo de Contrato *</label>
+              <select className="select" value={form.contract_type} onChange={e => change('contract_type', e.target.value)}>
+                <option value="normal">Normal</option>
+                <option value="installment">Parcelado</option>
+              </select>
+            </div>
+            <div className="field">
+              <label>Modalidade</label>
+              <select className="select" value={form.modalidade} onChange={e => change('modalidade', e.target.value)}>
+                <option>Pag. Único</option>
+                <option>Parcelado</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {isInstallment && (
+          <div style={{ marginBottom: 20 }}>
+            <h4 style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 15, fontWeight: 700, color: 'var(--gold-light)', marginBottom: 16 }}>
+              <Layers size={18} /> Parcelamento
+            </h4>
+            <div className="form-grid">
+              <div className="field">
+                <label>Número de parcelas *</label>
+                <input
+                  className={`input ${validationErrors.some(e => e.includes('parcelas')) ? 'error' : ''}`}
+                  type="number" min="1"
+                  value={form.numero_parcelas}
+                  onChange={e => change('numero_parcelas', e.target.value)}
+                  placeholder="10"
+                  required
+                />
+              </div>
+              <div className="field">
+                <label>Valor da parcela *</label>
+                <input
+                  className={`input ${validationErrors.some(e => e.includes('parcela')) ? 'error' : ''}`}
+                  type="number" min="0" step="0.01"
+                  value={form.valor_parcela}
+                  onChange={e => change('valor_parcela', e.target.value)}
+                  placeholder="600"
+                  required
+                />
+              </div>
+              <div className="field">
+                <label>Primeiro vencimento *</label>
+                <input
+                  className={`input ${validationErrors.some(e => e.includes('vencimento')) ? 'error' : ''}`}
+                  type="date"
+                  value={form.primeiro_vencimento}
+                  onChange={e => change('primeiro_vencimento', e.target.value)}
+                  required
+                />
+              </div>
+              <div className="field">
+                <label>Periodicidade</label>
+                <select className="select" value={form.periodicidade} onChange={e => change('periodicidade', e.target.value)}>
+                  <option>Mensal</option>
+                  <option>Quinzenal</option>
+                  <option>Semanal</option>
+                </select>
+              </div>
+            </div>
+            {totalReceber > 0 && (
+              <div style={{ marginTop: 10, padding: '10px 14px', background: 'rgba(212,175,55,0.06)', borderRadius: 10, border: '1px solid rgba(212,175,55,0.15)' }}>
+                <span style={{ color: 'var(--text-secondary)', fontSize: 13 }}>Total a receber: </span>
+                <span style={{ color: 'var(--gold)', fontWeight: 800, fontSize: 16 }}>{money(totalReceber)}</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div style={{ marginBottom: 20 }}>
+          <h4 style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 15, fontWeight: 700, color: 'var(--gold-light)', marginBottom: 16 }}>
             <Calendar size={18} /> Datas
           </h4>
           <div className="form-grid">
@@ -258,13 +401,6 @@ export default function LoanForm({ initial, id }: { initial?: Initial; id?: stri
                 onChange={e => change('prazo_meses', e.target.value)}
                 required
               />
-            </div>
-            <div className="field">
-              <label>Modalidade</label>
-              <select className="select" value={form.modalidade} onChange={e => change('modalidade', e.target.value)}>
-                <option>Pag. Único</option>
-                <option>Parcelado</option>
-              </select>
             </div>
           </div>
         </div>
@@ -323,6 +459,26 @@ export default function LoanForm({ initial, id }: { initial?: Initial; id?: stri
           <span className="loan-summary-label">Principal</span>
           <span className="loan-summary-value">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(valor)}</span>
         </div>
+        <div className="loan-summary-row">
+          <span className="loan-summary-label">Tipo</span>
+          <span className="loan-summary-value">{isInstallment ? 'Parcelado' : 'Normal'}</span>
+        </div>
+        {isInstallment && (
+          <>
+            <div className="loan-summary-row">
+              <span className="loan-summary-label">Parcelas</span>
+              <span className="loan-summary-value">{numParcelas}</span>
+            </div>
+            <div className="loan-summary-row">
+              <span className="loan-summary-label">Valor/parcela</span>
+              <span className="loan-summary-value">{money(valParcela)}</span>
+            </div>
+            <div className="loan-summary-row">
+              <span className="loan-summary-label">Total a receber</span>
+              <span className="loan-summary-value" style={{ color: 'var(--gold)' }}>{money(totalReceber)}</span>
+            </div>
+          </>
+        )}
         <div className="loan-summary-row">
           <span className="loan-summary-label">Juros</span>
           <span className="loan-summary-value">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(jurosCalculado)}</span>
