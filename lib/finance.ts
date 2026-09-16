@@ -1,12 +1,13 @@
+import { isValid } from 'date-fns';
 import type { Loan, InstallmentStatus } from '@/types';
-import { generateInstallmentDates as buildInstallmentDates, getEffectiveInstallmentStatus } from '@/lib/installments';
 
 export const money = (value: number) =>
   new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(value || 0));
 
 export const localDate = (value: string) => {
   if (!value) return '—';
-  return new Intl.DateTimeFormat('pt-BR', { timeZone: 'UTC' }).format(new Date(`${value}T00:00:00Z`));
+  const d = new Date(`${value}T00:00:00Z`);
+  return isValid(d) ? new Intl.DateTimeFormat('pt-BR', { timeZone: 'UTC' }).format(d) : '—';
 };
 
 export const interest = (loan: Pick<Loan, 'valor_emprestado' | 'porcentagem_juros'>) =>
@@ -31,13 +32,14 @@ export function localISODate(d: Date = new Date()): string {
 export const isoToday = () => localISODate();
 
 export const addMonth = (iso: string) => {
-  const date = new Date(`${iso}T12:00:00`);
-  const originalDay = date.getDate();
-  date.setDate(1);
-  date.setMonth(date.getMonth() + 1);
-  const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
-  date.setDate(Math.min(originalDay, lastDay));
-  return localISODate(date);
+  const d = new Date(`${String(iso).slice(0, 10)}T12:00:00`);
+  if (!isValid(d)) return localISODate();
+  const originalDay = d.getDate();
+  d.setDate(1);
+  d.setMonth(d.getMonth() + 1);
+  const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  d.setDate(Math.min(originalDay, lastDay));
+  return localISODate(d);
 };
 
 export function parseCurrencyBR(value: string | null | undefined): number | null {
@@ -110,7 +112,11 @@ export function installmentStatus(installment: { paid_at: string | null; due_dat
 }
 
 export function getInstallmentStatus(dueDate: string, paidAt: string | null): InstallmentStatus {
-  return getEffectiveInstallmentStatus(dueDate, paidAt, isoToday());
+  if (paidAt) return 'Paga';
+  const today = isoToday();
+  if (dueDate < today) return 'Atrasada';
+  if (dueDate === today) return 'Vence hoje';
+  return 'A vencer';
 }
 
 export function generateInstallmentDates(
@@ -118,5 +124,16 @@ export function generateInstallmentDates(
   count: number,
   monthly: boolean = true
 ): string[] {
-  return buildInstallmentDates(firstDueDate, count, monthly ? 'Mensal' : 'Semanal');
+  const dates: string[] = [];
+  const base = new Date(`${String(firstDueDate).slice(0, 10)}T12:00:00`);
+  if (!isValid(base)) return dates;
+  for (let i = 0; i < count; i++) {
+    const d = new Date(base);
+    d.setMonth(d.getMonth() + i);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    dates.push(`${y}-${m}-${day}`);
+  }
+  return dates;
 }
